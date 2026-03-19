@@ -1,17 +1,30 @@
 {
   "manifest_version": 3,
   "name": "ClawdMate",
-  "version": "1.0.0",
+  "version": "1.1.1",
   "description": "Download slides, notes, assignments, QA, and QB from PESU Academy — merge PDFs, zip files, one click.",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-  "permissions": [],
-  "host_permissions": [
-    "https://www.pesuacademy.com/*"
+  "permissions": [
+    "declarativeNetRequest",
+    "declarativeNetRequestWithHostAccess"
   ],
+  "host_permissions": [
+    "https://www.pesuacademy.com/*",
+    "https://files.pesuacademy.com/*"
+  ],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "cors_rules",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
+  },
   "content_scripts": [
     {
       "matches": ["https://www.pesuacademy.com/Academy/*"],
