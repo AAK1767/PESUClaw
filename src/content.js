@@ -1,12 +1,12 @@
-// ClawdMate — Content Script
+// PESUClaw — Content Script
 // Injected into pesuacademy.com/Academy/* pages
 
 (function () {
   "use strict";
 
   // Prevent double-init
-  if (window._clawdMateInitialized) return;
-  window._clawdMateInitialized = true;
+  if (window._pesuClawInitialized) return;
+  window._pesuClawInitialized = true;
 
   // ─── Shared state (persists across SPA navigations) ───
   // cache structure: cache[unitText] = { '2': [items], '3': [items], ... }
@@ -20,7 +20,7 @@
       // Re-inject whenever #courselistunit exists but our tab button doesn't
       if (el && !btn) {
         console.log(
-          "[ClawdMate] #courselistunit found without tab button — injecting",
+          "[PESUClaw] #courselistunit found without tab button — injecting",
         );
         inject();
       }
@@ -51,7 +51,7 @@
   function inject() {
     waitForJQuery(function ($) {
       if (!$("#courselistunit").length) return;
-      console.log("[ClawdMate] Injecting UI");
+      console.log("[PESUClaw] Injecting UI");
 
       // ─── State (per injection) ───
       var _fetching = false;
@@ -74,7 +74,7 @@
 
       // Tab button
       const navBtn = $(
-        '<li id="pesu-dl-tab-btn"><a href="javascript:void(0)">ClawdMate</a></li>',
+        '<li id="pesu-dl-tab-btn"><a href="javascript:void(0)">PESUClaw</a></li>',
       );
       $("#courselistunit").append(navBtn);
 
@@ -166,7 +166,7 @@
         }
       });
 
-      // ─── Get active unit text (excluding ClawdMate tab) ───
+      // ─── Get active unit text (excluding PESUClaw tab) ───
       function getActiveUnitText() {
         var texts = [];
         $("#courselistunit li.active a").each(function () {
@@ -206,7 +206,7 @@
         if (!totalCount) return;
 
         console.log(
-          "[ClawdMate] " +
+          "[PESUClaw] " +
             typeLabel +
             " " +
             unitText +
@@ -508,7 +508,7 @@
         // Check if selected type is already cached
         if (!force && cachedUnit.hasOwnProperty(selectedType)) {
           console.log(
-            "[ClawdMate] Cache hit: " +
+            "[PESUClaw] Cache hit: " +
               activeUnitText +
               " type=" +
               selectedType,
@@ -589,7 +589,7 @@
           );
 
           console.log(
-            "[ClawdMate] Direct course content found:",
+            "[PESUClaw] Direct course content found:",
             classes.length,
             classes,
           );
@@ -789,7 +789,7 @@
                   var itemsFound = newItems[typeId].length - itemsBefore;
                   if (itemsFound > 0) {
                     console.log(
-                      "[ClawdMate] Found " +
+                      "[PESUClaw] Found " +
                         itemsFound +
                         " items for " +
                         typeLabel +
@@ -807,7 +807,7 @@
                     );
                   } else if (response.length > 100) {
                     console.log(
-                      "[ClawdMate] DEBUG: No items for " +
+                      "[PESUClaw] DEBUG: No items for " +
                         typeLabel +
                         " class=" +
                         cls.name +
@@ -822,7 +822,7 @@
                 }
               } catch (err) {
                 console.warn(
-                  "[ClawdMate] warn: " + cls.name + " (" + typeLabel + ")",
+                  "[PESUClaw] warn: " + cls.name + " (" + typeLabel + ")",
                   err.statusText || err,
                 );
               }
@@ -854,7 +854,7 @@
             totalCached += cachedUnit[k].length;
           });
           console.log(
-            "[ClawdMate] Cached: " +
+            "[PESUClaw] Cached: " +
               activeUnitText +
               " (" +
               totalCached +
@@ -862,7 +862,7 @@
           );
           renderItems(activeUnitText, cachedUnit, false);
         } catch (err) {
-          console.error("[ClawdMate] Fetch error:", err);
+          console.error("[PESUClaw] Fetch error:", err);
           titleDiv.text("Error");
           statusDiv.text("Failed: " + (err.message || err));
           progressWrap.hide();
@@ -884,7 +884,7 @@
         var observer = new MutationObserver(function () {
           var newTab = getActiveUnitText();
           if (newTab && newTab !== _lastActiveTab) {
-            console.log("[ClawdMate] Tab: " + _lastActiveTab + " -> " + newTab);
+            console.log("[PESUClaw] Tab: " + _lastActiveTab + " -> " + newTab);
             _lastActiveTab = newTab;
             if (container.is(":visible")) {
               navBtn.addClass("active");
@@ -899,7 +899,7 @@
         });
       }
 
-      console.log("[ClawdMate] Ready");
+      console.log("[PESUClaw] Ready");
 
       // ─── Helpers ───
       function matchUnit(units, text) {

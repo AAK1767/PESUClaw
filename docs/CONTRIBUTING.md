@@ -1,12 +1,12 @@
-# Contributing to ClawdMate
+# Contributing to PESUClaw
 
-Thank you for considering contributing to ClawdMate! This document outlines how to get involved.
+Thank you for considering contributing to PESUClaw! This document outlines how to get involved.
 
 ## How to contribute
 
 ### Reporting bugs
 
-1. Check [existing issues](https://github.com/AAK1767/ClawdMate/issues) to avoid duplicates
+1. Check [existing issues](https://github.com/AAK1767/PESUClaw/issues) to avoid duplicates
 2. Open a new issue with:
    - A clear, descriptive title
    - Steps to reproduce the bug
@@ -39,8 +39,8 @@ Open an issue with the `enhancement` label. Describe:
 ## Development setup
 
 ```bash
-git clone https://github.com/AAK1767/ClawdMate.git
-cd ClawdMate
+git clone https://github.com/AAK1767/PESUClaw.git
+cd PESUClaw
 ./build.sh          # or .\build.ps1 on Windows
 ```
 
@@ -70,7 +70,7 @@ See [DEVELOPER.md](DEVELOPER.md) for architecture details (in this same `docs/` 
 - Prefer `const` and `let` over `var`
 - Use meaningful variable names
 - Keep functions focused — one responsibility per function
-- Add `[ClawdMate]` prefix to all `console.log` messages
+- Add `[PESUClaw]` prefix to all `console.log` messages
 - No external dependencies beyond pdf-lib and JSZip (both bundled)
 - jQuery is used from the host page — do not bundle it
 

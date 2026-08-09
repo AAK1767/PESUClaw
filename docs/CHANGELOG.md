@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to ClawdMate will be documented in this file.
+All notable changes to PESUClaw will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Firefox support (Manifest V2) with `loader.js` for MAIN-world script injection
-- `browser_specific_settings.gecko` in Firefox manifest (ID: `clawdmate@pesuacademy`, min version 91)
+- `browser_specific_settings.gecko` in Firefox manifest (ID: `pesuclaw@pesuacademy`, min version 91)
 - Monorepo structure: shared source in `src/`, platform-specific files in `platforms/`
 - Build scripts (`build.ps1` for Windows, `build.sh` for Linux/macOS) to assemble both versions
 - GitHub Actions workflow for automated releases — push a version tag to create a release with pre-built zips
@@ -29,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Chrome extension (Manifest V3) with content script injection
-- "ClawdMate" tab injected into PESU Academy course unit navigation
+- "PESUClaw" tab injected into PESU Academy course unit navigation
 - Floating download panel with file listing and progress bar
 - PDF merging — all PDF slides merged into a single file via pdf-lib
 - PPTX zipping — all PowerPoint files bundled into a ZIP via JSZip

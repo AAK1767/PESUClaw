@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "ClawdMate",
+  "name": "PESUClaw",
   "version": "1.2.0",
   "description": "Download slides, notes, assignments, QA, and QB from PESU Academy — merge PDFs, zip files, one click.",
   "icons": {

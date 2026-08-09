@@ -1,4 +1,4 @@
-// ClawdMate — Firefox Loader
+// PESUClaw — Firefox Loader
 // Injects libraries and content script into the page's MAIN world
 // (Firefox content scripts run in an isolated sandbox by default)
 

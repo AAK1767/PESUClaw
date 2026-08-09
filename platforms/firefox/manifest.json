@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "ClawdMate",
+  "name": "PESUClaw",
   "version": "1.2.0",
   "description": "Download slides, notes, assignments, QA, and QB from PESU Academy — merge PDFs, zip files, one click.",
   "icons": {
@@ -40,7 +40,7 @@
   ],
   "browser_specific_settings": {
     "gecko": {
-      "id": "clawdmate@pesuacademy",
+      "id": "pesuclaw@pesuacademy",
       "strict_min_version": "140.0",
       "data_collection_permissions": {
         "personal_data_collected": false,

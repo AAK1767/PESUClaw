@@ -36,10 +36,10 @@ build_extension() {
   echo "Built $name -> build/$name/"
 
   if $ZIP; then
-    local zipfile="$BUILD/ClawdMate-${name}.zip"
+    local zipfile="$BUILD/PESUClaw-${name}.zip"
     rm -f "$zipfile"
     (cd "$out" && zip -r "$zipfile" .)
-    echo "Packaged $name -> ClawdMate-${name}.zip"
+    echo "Packaged $name -> PESUClaw-${name}.zip"
   fi
 }
 

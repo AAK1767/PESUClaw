@@ -2,7 +2,7 @@
   // Load libraries from CDN
   async function loadCDN(url, name) {
     if (window[name]) return;
-    console.log('[ClawdMate] Loading ' + name + '...');
+    console.log('[PESUClaw] Loading ' + name + '...');
     await new Promise((resolve, reject) => {
       const s = document.createElement('script');
       s.src = url;
@@ -10,7 +10,7 @@
       s.onerror = () => reject(new Error('Failed to load ' + name));
       document.head.appendChild(s);
     });
-    console.log('[ClawdMate] ' + name + ' loaded');
+    console.log('[PESUClaw] ' + name + ' loaded');
   }
   await loadCDN('https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js', 'PDFLib');
   await loadCDN('https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js', 'JSZip');
@@ -27,7 +27,7 @@
   if (window._pesuTabObserver) { window._pesuTabObserver.disconnect(); window._pesuTabObserver = null; }
 
   // ─── Download button at end of unit tabs ───
-  const navBtn = $('<li id="pesu-dl-tab-btn"><a href="javascript:void(0)" style="cursor:pointer;color:#0091CD;font-weight:600;">ClawdMate</a></li>');
+  const navBtn = $('<li id="pesu-dl-tab-btn"><a href="javascript:void(0)" style="cursor:pointer;color:#0091CD;font-weight:600;">PESUClaw</a></li>');
   $('#courselistunit').append(navBtn);
 
   const container = $('<div id="pesu-dl-helper"></div>').css({
@@ -98,7 +98,7 @@
 
     if (downloadItems.length === 0) return;
 
-    console.log('[ClawdMate] ' + activeUnitText + ' — ' + downloadItems.length + ' files' + (fromCache ? ' (cached)' : ''));
+    console.log('[PESUClaw] ' + activeUnitText + ' — ' + downloadItems.length + ' files' + (fromCache ? ' (cached)' : ''));
 
     // Merge & Download button
     const dlAllBtn = $('<button>Merge & Download</button>').css({
@@ -246,7 +246,7 @@
 
     // Check cache first (unless force refresh)
     if (!force && cache[activeUnitText]) {
-      console.log('[ClawdMate] Cache hit: ' + activeUnitText + ' (' + cache[activeUnitText].length + ' items)');
+      console.log('[PESUClaw] Cache hit: ' + activeUnitText + ' (' + cache[activeUnitText].length + ' items)');
       renderItems(activeUnitText, cache[activeUnitText], true);
       return;
     }
@@ -363,7 +363,7 @@
 
       // ─── Cache the results ───
       cache[activeUnitText] = downloadItems;
-      console.log('[ClawdMate] Cached: ' + activeUnitText + ' (' + downloadItems.length + ' items)');
+      console.log('[PESUClaw] Cached: ' + activeUnitText + ' (' + downloadItems.length + ' items)');
 
       // ─── Render results ───
       renderItems(activeUnitText, downloadItems, false);
@@ -388,16 +388,16 @@
     const observer = new MutationObserver(function() {
       const newTab = $('#courselistunit li.active a').text().trim();
       if (newTab && newTab !== _lastActiveTab) {
-        console.log('[ClawdMate] Tab: ' + _lastActiveTab + ' → ' + newTab);
+        console.log('[PESUClaw] Tab: ' + _lastActiveTab + ' → ' + newTab);
         _lastActiveTab = newTab;
         if (container.is(':visible')) fetchAndRender();
       }
     });
     observer.observe(tabContainer, { subtree: true, attributes: true, attributeFilter: ['class'] });
     window._pesuTabObserver = observer;
-    console.log('[ClawdMate] Watching tab changes');
+    console.log('[PESUClaw] Watching tab changes');
   }
 
   // ─── Ready (panel hidden until nav button clicked) ───
-  console.log('[ClawdMate] Ready. ' + Object.keys(cache).length + ' units cached.');
+  console.log('[PESUClaw] Ready. ' + Object.keys(cache).length + ' units cached.');
 })();

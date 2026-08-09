@@ -43,10 +43,10 @@ function Build-Extension {
     Write-Host "Built $Name -> build/$Name/"
 
     if ($Zip) {
-        $ZipFile = Join-Path $Build "ClawdMate-$Name.zip"
+        $ZipFile = Join-Path $Build "PESUClaw-$Name.zip"
         if (Test-Path $ZipFile) { Remove-Item -Force $ZipFile }
         Compress-Archive -Path (Join-Path $OutDir '*') -DestinationPath $ZipFile
-        Write-Host "Packaged $Name -> build/ClawdMate-$Name.zip"
+        Write-Host "Packaged $Name -> build/PESUClaw-$Name.zip"
     }
 }
 

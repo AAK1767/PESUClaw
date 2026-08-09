@@ -1,10 +1,10 @@
-# ClawdMate
+# PESUClaw
 
 A browser extension for **Chrome** and **Firefox** that adds bulk downloading of course materials from [PESU Academy](https://www.pesuacademy.com/Academy/). Download slides, notes, assignments, question banks, and question answers — merge PDFs, zip files, or download individually — right from the course page.
 
 ## Features
 
-- **ClawdMate tab** — appears alongside your course unit tabs
+- **PESUClaw tab** — appears alongside your course unit tabs
 - **Multiple resource types** — toggle between Slides, Notes, Assignments, QB, and QA
 - **PDF merge** — all PDF files combined into a single file via pdf-lib
 - **ZIP bundling** — non-PDF files (PPTX, DOC, etc.) bundled into one ZIP via JSZip
@@ -16,10 +16,10 @@ A browser extension for **Chrome** and **Firefox** that adds bulk downloading of
 
 ## Installation
 
-1. Go to the [Releases page](https://github.com/AAK1767/ClawdMate/releases/latest)
+1. Go to the [Releases page](https://github.com/AAK1767/PESUClaw/releases/latest)
 2. Download the zip for your browser:
-   - **Chrome** → `ClawdMate-Chrome-vX.X.X.zip`
-   - **Firefox** → `ClawdMate-Firefox-vX.X.X.zip`
+   - **Chrome** → `PESUClaw-Chrome-vX.X.X.zip`
+   - **Firefox** → `PESUClaw-Firefox-vX.X.X.zip`
 3. Unzip it to a folder
 
 ### Chrome (recommended)
@@ -37,8 +37,8 @@ A browser extension for **Chrome** and **Firefox** that adds bulk downloading of
 
 1. Clone and build:
    ```bash
-   git clone https://github.com/AAK1767/ClawdMate.git
-   cd ClawdMate
+   git clone https://github.com/AAK1767/PESUClaw.git
+   cd PESUClaw
    ./build.sh          # or .\build.ps1 on Windows
    ```
 
@@ -59,11 +59,11 @@ A browser extension for **Chrome** and **Firefox** that adds bulk downloading of
 
 1. Log in to [PESU Academy](https://www.pesuacademy.com/Academy/)
 2. Navigate to **My Courses → [Your Subject] → Course Units**
-3. Click the **ClawdMate** tab that appears at the end of the unit tabs
+3. Click the **PESUClaw** tab that appears at the end of the unit tabs
 4. Select a resource type: **Slides**, **Notes**, **Assignments**, **QB**, or **QA**
 5. Click **Merge & Download** to get everything, or click individual files
 
-> **Note:** Please disable any download managers (IDM, FDM, JDownloader, etc.) or their browser extensions before using ClawdMate. They intercept file downloads and interfere with PDF merging and ZIP bundling.
+> **Note:** Please disable any download managers (IDM, FDM, JDownloader, etc.) or their browser extensions before using PESUClaw. They intercept file downloads and interfere with PDF merging and ZIP bundling.
 
 ## How it works
 
@@ -92,7 +92,7 @@ All processing happens in your browser. No data is sent to any third-party serve
 ## Project structure
 
 ```
-ClawdMate/
+PESUClaw/
 ├── src/                         # Shared source (both browsers)
 │   ├── content.js               # Main content script — UI + fetch + merge logic
 │   ├── popup.html               # Extension popup (toolbar icon click)
@@ -134,7 +134,7 @@ ClawdMate/
 
 ## Privacy
 
-ClawdMate runs entirely in your browser. It does not:
+PESUClaw runs entirely in your browser. It does not:
 
 - Collect or transmit any personal data
 - Send analytics or telemetry

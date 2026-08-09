@@ -1,12 +1,12 @@
-# ClawdMate — Developer Guide
+# PESUClaw — Developer Guide
 
-Technical documentation covering the architecture, API flow, and internals of the ClawdMate browser extension (Chrome & Firefox).
+Technical documentation covering the architecture, API flow, and internals of the PESUClaw browser extension (Chrome & Firefox).
 
 ---
 
 ## Architecture
 
-ClawdMate injects a content script into PESU Academy pages. The content script adds UI elements to the DOM and communicates with PESU Academy's internal APIs using the user's existing session.
+PESUClaw injects a content script into PESU Academy pages. The content script adds UI elements to the DOM and communicates with PESU Academy's internal APIs using the user's existing session.
 
 ### Chrome (Manifest V3)
 
@@ -38,7 +38,7 @@ Firefox content scripts run in an isolated sandbox. `loader.js` bridges this gap
 Page load → scripts injected at document_idle
   → content.js waits for jQuery (from PESU page)
   → checks for #courselistunit
-  → injects "ClawdMate" tab + floating panel
+  → injects "PESUClaw" tab + floating panel
   → waits for user interaction
   → fetch → render → cache
 ```
@@ -248,9 +248,9 @@ The extension uses:
 ### Debugging
 
 - Open DevTools on the PESU Academy page
-- Filter console by `[ClawdMate]` to see extension logs
+- Filter console by `[PESUClaw]` to see extension logs
 - The content script runs in the page's main world (same as jQuery)
-- Use the Sources tab → Content scripts → ClawdMate to set breakpoints
+- Use the Sources tab → Content scripts → PESUClaw to set breakpoints
 
 ---
 

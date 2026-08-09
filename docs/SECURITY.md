@@ -8,7 +8,7 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in ClawdMate, please report it responsibly.
+If you discover a security vulnerability in PESUClaw, please report it responsibly.
 
 **Do not open a public issue for security vulnerabilities.**
 
@@ -29,7 +29,7 @@ Instead, email the maintainer directly or use GitHub's private vulnerability rep
 
 ## Security considerations
 
-ClawdMate is a client-side browser extension (Chrome & Firefox). Important notes:
+PESUClaw is a client-side browser extension (Chrome & Firefox). Important notes:
 
 - **No data collection**: The extension does not collect, store, or transmit any user data
 - **No external requests**: All network requests go exclusively to `pesuacademy.com` using your existing session
