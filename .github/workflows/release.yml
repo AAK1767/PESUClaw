@@ -37,36 +37,36 @@ jobs:
       - name: Package Chrome extension
         run: |
           cd build/chrome
-          zip -r "../../ClawdMate-Chrome-${{ steps.version.outputs.tag }}.zip" .
+          zip -r "../../PESUClaw-Chrome-${{ steps.version.outputs.tag }}.zip" .
 
       - name: Package Firefox extension
         run: |
           cd build/firefox
-          zip -r "../../ClawdMate-Firefox-${{ steps.version.outputs.tag }}.zip" .
+          zip -r "../../PESUClaw-Firefox-${{ steps.version.outputs.tag }}.zip" .
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
-          name: ClawdMate ${{ steps.version.outputs.tag }}
+          name: PESUClaw ${{ steps.version.outputs.tag }}
           body: |
             ## Installation
 
             ### Chrome (recommended)
-            1. Download **ClawdMate-Chrome-${{ steps.version.outputs.tag }}.zip**
+            1. Download **PESUClaw-Chrome-${{ steps.version.outputs.tag }}.zip**
             2. Unzip it to a folder
             3. Open `chrome://extensions` → enable **Developer mode**
             4. Click **Load unpacked** → select the unzipped folder
             5. The extension stays installed until you remove it
 
             ### Firefox
-            1. Download **ClawdMate-Firefox-${{ steps.version.outputs.tag }}.zip**
+            1. Download **PESUClaw-Firefox-${{ steps.version.outputs.tag }}.zip**
             2. Unzip it to a folder
             3. Open `about:debugging` → **This Firefox** → **Load Temporary Add-on**
             4. Select `manifest.json` inside the unzipped folder
 
             > ⚠️ Firefox temporary add-ons are removed when you close Firefox. You'll need to repeat steps 3–4 each time you restart the browser.
           files: |
-            ClawdMate-Chrome-${{ steps.version.outputs.tag }}.zip
-            ClawdMate-Firefox-${{ steps.version.outputs.tag }}.zip
+            PESUClaw-Chrome-${{ steps.version.outputs.tag }}.zip
+            PESUClaw-Firefox-${{ steps.version.outputs.tag }}.zip
           generate_release_notes: true
