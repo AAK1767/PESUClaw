@@ -79,6 +79,12 @@ The extension injects a content script into PESU Academy pages. It uses the acad
 
 All processing happens in your browser. No data is sent to any third-party server.
 
+## Known drawbacks
+
+- Only PDF files can be merged directly.
+- If a file is anything other than PDF (for example PPTX, DOC, DOCX, etc.), it is added to a ZIP instead of being converted.
+- Converting office formats to PDF inside a browser extension is not reliably possible on the web without external conversion services, so PESUClaw does not attempt in-extension conversion.
+
 ## Supported resource types
 
 | Type | ID | Description |
