@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "PESUClaw",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Download slides, notes, assignments, QA, and QB from PESU Academy — merge PDFs, zip files, one click.",
   "icons": {
     "16": "icons/icon16.png",
@@ -14,7 +14,8 @@
   ],
   "host_permissions": [
     "https://www.pesuacademy.com/*",
-    "https://files.pesuacademy.com/*"
+    "https://files.pesuacademy.com/*",
+    "https://api.github.com/*"
   ],
   "declarative_net_request": {
     "rule_resources": [

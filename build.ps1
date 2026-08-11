@@ -31,6 +31,7 @@ function Build-Extension {
     # Copy shared source
     Copy-Item (Join-Path $Src 'content.js')  $OutDir
     Copy-Item (Join-Path $Src 'popup.html')  $OutDir
+    Copy-Item (Join-Path $Src 'popup.js')    $OutDir
     Copy-Item (Join-Path $Src 'panel.css')   $OutDir
     Copy-Item -Recurse (Join-Path $Src 'lib')   (Join-Path $OutDir 'lib')
     Copy-Item -Recurse (Join-Path $Src 'icons') (Join-Path $OutDir 'icons')

@@ -494,6 +494,7 @@
 
       // ─── Fetch & render ───
       async function fetchAndRender(force) {
+        var subjectid = null;
         // Cancel previous fetch by bumping version
         _fetchVersion++;
         var myVersion = _fetchVersion;
@@ -508,10 +509,7 @@
         // Check if selected type is already cached
         if (!force && cachedUnit.hasOwnProperty(selectedType)) {
           console.log(
-            "[PESUClaw] Cache hit: " +
-              activeUnitText +
-              " type=" +
-              selectedType,
+            "[PESUClaw] Cache hit: " + activeUnitText + " type=" + selectedType,
           );
           renderItems(activeUnitText, cachedUnit, true);
           return;
@@ -540,42 +538,155 @@
 
           var classes = [];
           var seenClassIds = new Set();
-          var subjectid = null;
+
+          // Get the currently active unit
+          var $activeUnit = $("#courselistunit li.active a").first();
+
+          if (!$activeUnit.length) {
+            throw new Error("Could not determine active PESU unit");
+          }
+
+          // Get the actual PESU unit ID from:
+          // onclick="handleclassUnit('69837')"
+          var unitMatch = ($activeUnit.attr("onclick") || "").match(
+            /handleclassUnit\s*\(\s*['"]([^'"]+)['"]/,
+          );
+
+          if (!unitMatch) {
+            throw new Error("Could not determine active unit ID");
+          }
+
+          var activeUnitId = unitMatch[1];
+
+          var activeUnitText =
+            $activeUnit.attr("title") || $activeUnit.text().trim();
+
+          console.log(
+            "[PESUClaw] Active unit:",
+            activeUnitText,
+            "| ID:",
+            activeUnitId,
+          );
+
+          // PESU changes the active unit tab first, then updates
+          // #CourseContentId asynchronously.
+          //
+          // Therefore, when switching units while PESUClaw is open,
+          // the DOM may still contain the PREVIOUS unit's rows.
+          //
+          // Wait until the course-content rows actually belong
+          // to the currently active unit.
+
+          var contentReady = false;
+          var maxAttempts = 50; // 5 seconds maximum
+          var attempt = 0;
+
+          while (!contentReady && attempt < maxAttempts) {
+            if (isCancelled()) {
+              _fetching = false;
+              return;
+            }
+
+            var matchingRows = 0;
+
+            $(
+              '#CourseContentId [onclick*="handleclasscoursecontentunit"]',
+            ).each(function () {
+              var onclick = $(this).attr("onclick") || "";
+
+              var m = onclick.match(
+                /handleclasscoursecontentunit\s*\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]/,
+              );
+
+              if (!m) return;
+
+              var currentUnitId = m[3];
+
+              if (currentUnitId === activeUnitId) {
+                matchingRows++;
+              }
+            });
+
+            if (matchingRows > 0) {
+              contentReady = true;
+
+              console.log(
+                "[PESUClaw] Course content updated for unit",
+                activeUnitId,
+                "| matching rows:",
+                matchingRows,
+              );
+
+              break;
+            }
+
+            attempt++;
+
+            if (attempt === 1) {
+              console.log(
+                "[PESUClaw] Waiting for PESU to update course content...",
+              );
+            }
+
+            await new Promise(function (resolve) {
+              setTimeout(resolve, 100);
+            });
+          }
+
+          if (isCancelled()) {
+            _fetching = false;
+            return;
+          }
+
+          if (!contentReady) {
+            throw new Error(
+              "PESU course content did not update for unit " + activeUnitId,
+            );
+          }
+
+          // Now that the DOM definitely contains the active unit,
+          // collect ONLY its course-content rows.
+
+          var classes = [];
+          var seenClassIds = new Set();
 
           $('#CourseContentId [onclick*="handleclasscoursecontentunit"]').each(
             function () {
               var onclick = $(this).attr("onclick") || "";
 
               var m = onclick.match(
-                /handleclasscoursecontentunit\s*\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]/,
+                /handleclasscoursecontentunit\s*\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]/,
               );
 
               if (!m) return;
 
               var classId = m[1];
               var currentSubjectId = m[2];
+              var currentUnitId = m[3];
 
-              // Get subject ID from the first valid course-content entry
+              // Ignore content from every other unit.
+              if (currentUnitId !== activeUnitId) {
+                return;
+              }
+
+              // Get subject ID from the first matching content item.
               if (!subjectid) {
                 subjectid = currentSubjectId;
               }
 
-              // Only use entries belonging to the current subject
-              if (currentSubjectId !== subjectid) return;
+              // Same UUID occurs multiple times because the same
+              // row has multiple resource-type links.
+              if (seenClassIds.has(classId)) {
+                return;
+              }
 
-              // Nested elements have the same onclick — deduplicate them
-              if (seenClassIds.has(classId)) return;
               seenClassIds.add(classId);
 
-              // Try to get a sensible title from the row
               var $row = $(this).closest("tr");
 
               var name = $row.length
-                ? $row.find("td").first().text().trim()
-                : $(this).text().trim();
-
-              // Clean whitespace
-              name = name.replace(/\s+/g, " ").trim();
+                ? $row.find("td").first().text().replace(/\s+/g, " ").trim()
+                : $(this).text().replace(/\s+/g, " ").trim();
 
               if (!name) {
                 name = "Course Content " + (classes.length + 1);
@@ -584,14 +695,41 @@
               classes.push({
                 id: classId,
                 name: name,
+                subjectId: currentSubjectId,
+                unitId: currentUnitId,
               });
             },
           );
 
+          if (!subjectid) {
+            throw new Error(
+              "Could not determine subject ID from active unit content",
+            );
+          }
+
           console.log(
-            "[PESUClaw] Direct course content found:",
+            "[PESUClaw] Unit:",
+            activeUnitText,
+            "| ID:",
+            activeUnitId,
+            "| Subject:",
+            subjectid,
+            "| Content found:",
             classes.length,
-            classes,
+          );
+
+          console.log(
+            "[PESUClaw] Content IDs:",
+            classes.map(function (c) {
+              return c.id + " → " + c.name;
+            }),
+          );
+
+          console.log(
+            "[PESUClaw] Content IDs:",
+            classes.map(function (c) {
+              return c.id + " → " + c.name;
+            }),
           );
 
           if (!classes.length) {

@@ -26,6 +26,7 @@ build_extension() {
   # Shared source
   cp "$SRC/content.js"  "$out/"
   cp "$SRC/popup.html"  "$out/"
+  cp "$SRC/popup.js"    "$out/"
   cp "$SRC/panel.css"   "$out/"
   cp -r "$SRC/lib"      "$out/lib"
   cp -r "$SRC/icons"    "$out/icons"

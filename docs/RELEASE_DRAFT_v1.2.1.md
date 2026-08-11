@@ -1,13 +1,15 @@
-# Release v1.2.1 — 2026-08-09
+# Release v1.2.1 — 2026-08-11
 
-This release prepares the project for publishing under the new product name: PESUClaw.
+This release prepares the project for publishing under the new product name: PESUClaw and fixes chapter switching while the PESUClaw tab remains open.
 
 ## Summary
 - Rename: Replace old product name `ClawdMate` with `PESUClaw` in release artifacts and GitHub Actions workflow.
 - Updated: `.github/workflows/release.yml` now produces `PESUClaw-Chrome-<tag>.zip` and `PESUClaw-Firefox-<tag>.zip` and uses `PESUClaw <tag>` as the release title.
+- Fixed: Chapter changes no longer break the PESUClaw panel when it is already open; the content script now waits for the new unit content to load before scanning.
 
 ## Changes
 - Workflow: Updated artifact filenames and release metadata in `.github/workflows/release.yml`.
+- Content script: Improved unit switching handling so an open PESUClaw tab refreshes correctly after a chapter change.
 
 ## How to publish
 1. Build local extension artifacts:

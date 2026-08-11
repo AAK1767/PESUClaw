@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.1.1] - 2026-03-19
 
-## [1.2.1] - 2026-08-09
+## [1.2.1] - 2026-08-11
 
 ### Changed
 - Renamed release artifacts and release metadata from `ClawdMate` to `PESUClaw` in the GitHub Actions workflow (`.github/workflows/release.yml`).
@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Fixed CORS issues when downloading files for merging by adding `files.pesuacademy.com` to permissions and declarativeNetRequest rules for Chrome.
+- Fixed chapter switching while the PESUClaw tab stays open by waiting for PESU Academy to finish updating the active unit's content before scanning it.
 
 ## [1.1.0] - 2026-03-09
 
