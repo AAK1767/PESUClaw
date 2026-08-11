@@ -5,6 +5,15 @@ All notable changes to PESUClaw will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2] - 2026-08-11
+
+### Changed
+- Added a GitHub release check in the extension popup and packaged the popup script in both build outputs.
+- Allowed the popup to query GitHub's release API so update availability can be shown immediately.
+
+### Fixed
+- Fixed chapter switching while the PESUClaw tab stays open by waiting for PESU Academy to finish updating the active unit's content before scanning it.
+
 ## [1.1.1] - 2026-03-19
 
 ## [1.2.1] - 2026-08-11
