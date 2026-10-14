@@ -83,8 +83,8 @@
       if (compareVersions(latestVersion, currentVersion) > 0) {
         setStatus(
           {
-            text: 'Update available: v' + latestVersion + '.',
-            linkText: 'Open release',
+            text: 'New release v' + latestVersion + ' is available. Download and install it to update PESUClaw.',
+            linkText: 'Download update',
             linkUrl: release.html_url || releasePageUrl
           },
           'available'

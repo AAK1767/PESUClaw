@@ -7,12 +7,14 @@ A browser extension for **Chrome** and **Firefox** that adds bulk downloading of
 - **PESUClaw tab** — appears alongside your course unit tabs
 - **Multiple resource types** — toggle between Slides, Notes, Assignments, QB, and QA
 - **PDF merge** — all PDF files combined into a single file via pdf-lib
-- **ZIP bundling** — non-PDF files (PPTX, DOC, etc.) bundled into one ZIP via JSZip
+- **ZIP bundling** — non-PDF files (PPTX, DOC, DOCX, archives, etc.) bundled into one ZIP via JSZip
+- **Office merge helper** — bundles containing DOC, DOCX, or PPTX files include `merge_office_files.py`, which uses LibreOffice or Microsoft Office on Windows and `pypdf` to convert and merge them in numbered order
 - **Individual downloads** — click any file to download it separately
 - **Caching** — switching between unit tabs and resource types is instant after the first fetch
 - **Auto-detect** — panel updates automatically when you switch unit tabs
 - **Progress tracking** — visual progress bar while scanning and downloading
 - **Smart naming** — ZIP entries named `(number)_title.ext` with duplicate disambiguation
+- **GitHub update check** — the extension popup checks the latest GitHub release and explicitly links to the download when a newer version is available
 
 ## Installation
 
@@ -83,6 +85,7 @@ All processing happens in your browser. No data is sent to any third-party serve
 
 - Only PDF files can be merged directly.
 - If a file is anything other than PDF (for example PPTX, DOC, DOCX, etc.), it is added to a ZIP instead of being converted.
+- Office-file ZIP bundles include a Python helper. If the PDF merger package is missing, run `python -m pip install pypdf` (or `python -m pip install PyPDF2`). LibreOffice is preferred, but Windows users can use desktop Microsoft Office instead by installing `python -m pip install pywin32`.
 - Converting office formats to PDF inside a browser extension is not reliably possible on the web without external conversion services, so PESUClaw does not attempt in-extension conversion.
 
 ## Supported resource types

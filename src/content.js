@@ -263,6 +263,193 @@
       }
 
       // ─── Merge & download logic ───
+      function getResponseFilename(resp) {
+        var contentDisposition = resp.headers.get("Content-Disposition") || "";
+        var match = contentDisposition.match(
+          /filename\*?=(?:UTF-8''|["']?)([^;"'\n]+)/i,
+        );
+        if (!match) return "";
+
+        try {
+          return decodeURIComponent(match[1].trim().replace(/^["']|["']$/g, ""));
+        } catch (e) {
+          return match[1].trim().replace(/^["']|["']$/g, "");
+        }
+      }
+
+      function getFilenameExtension(filename) {
+        var dotPos = filename.lastIndexOf(".");
+        return dotPos > 0 ? filename.slice(dotPos).toLowerCase() : "";
+      }
+
+      function getArchiveExtension(header, filename, title) {
+        var filenameExt = getFilenameExtension(filename);
+        var titleExt = getFilenameExtension(title);
+        var isZip = header[0] === 0x50 && header[1] === 0x4b;
+        var isRar =
+          header[0] === 0x52 &&
+          header[1] === 0x61 &&
+          header[2] === 0x72 &&
+          header[3] === 0x21 &&
+          header[4] === 0x1a;
+        var is7z =
+          header[0] === 0x37 &&
+          header[1] === 0x7a &&
+          header[2] === 0xbc &&
+          header[3] === 0xaf &&
+          header[4] === 0x27;
+
+        if (
+          !isZip &&
+          !isRar &&
+          !is7z &&
+          titleExt !== ".zip" &&
+          titleExt !== ".rar" &&
+          titleExt !== ".7z"
+        ) {
+          return "";
+        }
+
+        // Preserve the server's actual file type for ZIP-based formats such as PPTX.
+        if (filenameExt) return filenameExt;
+        if (titleExt) return titleExt;
+        if (isZip) return ".zip";
+        if (
+          isRar
+        ) {
+          return ".rar";
+        }
+        if (
+          is7z
+        ) {
+          return ".7z";
+        }
+        return "";
+      }
+
+      function getOfficeExtension(filename) {
+        var extension = getFilenameExtension(filename);
+        return extension === ".doc" ||
+          extension === ".docx" ||
+          extension === ".pptx"
+          ? extension
+          : "";
+      }
+
+      function createOfficeMergeScript(fileNames, outputName) {
+        return [
+          "#!/usr/bin/env python3",
+          '"""Convert the bundled Office files to PDF and merge them in bundle order.',
+          "",
+          "Uses LibreOffice when available. On Windows, Microsoft Word/PowerPoint",
+          "can be used instead (requires desktop Microsoft Office and pywin32).",
+          'Install the PDF merger with: python -m pip install pypdf',
+          'Fallback PDF merger: python -m pip install PyPDF2',
+          'For the Microsoft Office fallback, also install: python -m pip install pywin32',
+          '"""',
+          "from pathlib import Path",
+          "import platform",
+          "import shutil",
+          "import subprocess",
+          "import sys",
+          "import tempfile",
+          "",
+          "try:",
+          "    from pypdf import PdfMerger",
+          "except ImportError:",
+          "    try:",
+          "        from PyPDF2 import PdfMerger",
+          "    except ImportError:",
+          "        try:",
+          "            from PyPDF2 import PdfFileMerger as PdfMerger",
+          "        except ImportError:",
+          "            sys.exit('Missing PDF package. Run \"python -m pip install pypdf\" (or \"python -m pip install PyPDF2\").')",
+          "",
+          "FILES = " + JSON.stringify(fileNames, null, 4) + "",
+          "OUTPUT = Path(" + JSON.stringify(outputName) + ")",
+          "",
+          "def convert_with_libreoffice(source, output_dir, soffice):",
+          "    subprocess.run(",
+          "        [soffice, '--headless', '--convert-to', 'pdf', '--outdir', str(output_dir), str(source)],",
+          "        check=True,",
+          "        stdout=subprocess.PIPE,",
+          "        stderr=subprocess.PIPE,",
+          "        text=True,",
+          "    )",
+          "    return output_dir / (source.stem + '.pdf')",
+          "",
+          "def convert_with_microsoft_office(source, output_dir):",
+          "    try:",
+          "        import win32com.client",
+          "    except ImportError:",
+          "        sys.exit('Microsoft Office fallback needs pywin32. Run \"python -m pip install pywin32\", then retry.')",
+          "",
+          "    output = output_dir / (source.stem + '.pdf')",
+          "    extension = source.suffix.lower()",
+          "    if extension in ('.doc', '.docx'):",
+          "        word = win32com.client.DispatchEx('Word.Application')",
+          "        document = None",
+          "        try:",
+          "            word.Visible = False",
+          "            document = word.Documents.Open(str(source), ReadOnly=True, AddToRecentFiles=False)",
+          "            document.ExportAsFixedFormat(str(output), 17)",
+          "        finally:",
+          "            if document is not None:",
+          "                document.Close(False)",
+          "            word.Quit()",
+          "    elif extension == '.pptx':",
+          "        powerpoint = win32com.client.DispatchEx('PowerPoint.Application')",
+          "        presentation = None",
+          "        try:",
+          "            presentation = powerpoint.Presentations.Open(str(source), WithWindow=False, ReadOnly=True)",
+          "            presentation.SaveAs(str(output), 32)",
+          "        finally:",
+          "            if presentation is not None:",
+          "                presentation.Close()",
+          "            powerpoint.Quit()",
+          "    else:",
+          "        sys.exit(f'Unsupported Office file: {source.name}')",
+          "    return output",
+          "",
+          "def main():",
+          "    soffice = shutil.which('soffice') or shutil.which('libreoffice')",
+          "    use_microsoft_office = not soffice and platform.system() == 'Windows'",
+          "    if not soffice and not use_microsoft_office:",
+          "        sys.exit('No converter found. Install LibreOffice, or run this on Windows with desktop Microsoft Office and pywin32.')",
+          "",
+          "    bundle_dir = Path(__file__).resolve().parent",
+          "    with tempfile.TemporaryDirectory(prefix='pesuclaw-') as temp_dir:",
+          "        converted_dir = Path(temp_dir)",
+          "        converted = []",
+          "        for index, file_name in enumerate(FILES, start=1):",
+          "            source = bundle_dir / file_name",
+          "            if not source.is_file():",
+          "                sys.exit(f'Missing bundled file: {file_name}')",
+          "            file_temp_dir = converted_dir / str(index)",
+          "            file_temp_dir.mkdir()",
+          "            if soffice:",
+          "                pdf_path = convert_with_libreoffice(source, file_temp_dir, soffice)",
+          "            else:",
+          "                pdf_path = convert_with_microsoft_office(source, file_temp_dir)",
+          "            if not pdf_path.is_file():",
+          "                sys.exit(f'Office converter did not create a PDF for: {file_name}')",
+          "            converted.append(pdf_path)",
+          "",
+          "        merger = PdfMerger()",
+          "        try:",
+          "            for pdf_path in converted:",
+          "                merger.append(str(pdf_path))",
+          "            merger.write(bundle_dir / OUTPUT)",
+          "        finally:",
+          "            merger.close()",
+          "    print(f'Created {OUTPUT} from {len(FILES)} Office files.')",
+          "",
+          "if __name__ == '__main__':",
+          "    main()",
+          "",
+        ].join("\n");
+      }
+
       async function mergeAndDownload(unitText, items, typeName, btn) {
         if (!items.length) {
           statusDiv.text("Nothing to download");
@@ -278,6 +465,7 @@
         var pdfCount = 0,
           failed = 0;
         var pptxFiles = [];
+        var officeFiles = [];
         var usedNames = new Set();
 
         for (var i = 0; i < items.length; i++) {
@@ -308,7 +496,12 @@
               hdr[1] === 0x50 &&
               hdr[2] === 0x44 &&
               hdr[3] === 0x46;
-            var isZip = hdr[0] === 0x50 && hdr[1] === 0x4b;
+            var responseFilename = getResponseFilename(resp);
+            var archiveExt = getArchiveExtension(
+              hdr,
+              responseFilename,
+              item.title,
+            );
 
             if (isPdf) {
               try {
@@ -339,45 +532,29 @@
                   .addClass("pesu-dl-item failed")
                   .text(item.title + " \u2014 error");
               }
-            } else if (isZip) {
-              var filename = "";
-              var cd = resp.headers.get("Content-Disposition");
-              if (cd) {
-                var m = cd.match(/filename\*?=(?:UTF-8''|["']?)([^;"'\n]+)/i);
-                if (m) filename = decodeURIComponent(m[1].trim());
-              }
-              // Get extension from original filename or default
-              var ext = "";
-              if (filename) {
-                var dotPos = filename.lastIndexOf(".");
-                ext = dotPos > 0 ? filename.slice(dotPos) : ".pptx";
-              } else {
-                ext = ".pptx";
-              }
+            } else if (archiveExt) {
               // Build name: (number)_title.ext
               var safeTitle = item.title.replace(/[/\\:*?"<>|]/g, "_").trim();
-              var zipEntryName = i + 1 + "_" + safeTitle + ext;
+              var zipEntryName = i + 1 + "_" + safeTitle + archiveExt;
               var finalName = zipEntryName,
                 counter = 1;
               while (usedNames.has(finalName.toLowerCase())) {
                 finalName =
-                  i + 1 + "_" + safeTitle + " (" + counter + ")" + ext;
+                  i + 1 + "_" + safeTitle + " (" + counter + ")" + archiveExt;
                 counter++;
               }
               usedNames.add(finalName.toLowerCase());
               pptxFiles.push({ name: finalName, data: arrayBuf });
+              if (getOfficeExtension(finalName)) {
+                officeFiles.push(finalName);
+              }
               $("#pesu-dl-item-" + i)
                 .removeClass()
                 .addClass("pesu-dl-item zipped")
                 .text(item.title + " \u2014 zipped");
             } else {
-              // Not PDF or ZIP — detect type from magic bytes / headers and add to ZIP bundle
-              var otherFilename = "";
-              var cd2 = resp.headers.get("Content-Disposition");
-              if (cd2) {
-                var m2 = cd2.match(/filename\*?=(?:UTF-8''|["']?)([^;"'\n]+)/i);
-                if (m2) otherFilename = decodeURIComponent(m2[1].trim());
-              }
+              // Not PDF or archive — detect type from magic bytes / headers and add to ZIP bundle
+              var otherFilename = responseFilename;
               if (!otherFilename) {
                 otherFilename = item.title.replace(/[/\\:*?"<>|]/g, "_");
                 // Guess extension from magic bytes
@@ -414,6 +591,9 @@
               }
               usedNames.add(otherFinal.toLowerCase());
               pptxFiles.push({ name: otherFinal, data: arrayBuf });
+              if (getOfficeExtension(otherFinal)) {
+                officeFiles.push(otherFinal);
+              }
               $("#pesu-dl-item-" + i)
                 .removeClass()
                 .addClass("pesu-dl-item zipped")
@@ -470,10 +650,26 @@
           pptxFiles.forEach(function (f) {
             zip.file(f.name, f.data);
           });
+          if (officeFiles.length > 0) {
+            var scriptName = "merge_office_files.py";
+            var outputName = safeName + "_" + typeName + "_Merged.pdf";
+            zip.file(
+              scriptName,
+              createOfficeMergeScript(officeFiles, outputName),
+            );
+          }
           var zipBlob = await zip.generateAsync({ type: "blob" });
           triggerDownload(zipBlob, safeName + "_" + typeName + "_files.zip");
           var sz2 = formatSize(zipBlob.size);
-          statusParts.push(pptxFiles.length + " files zipped \u00b7 " + sz2);
+          statusParts.push(
+            pptxFiles.length +
+              " files zipped" +
+              (officeFiles.length
+                ? " \u00b7 merge_office_files.py included"
+                : "") +
+              " \u00b7 " +
+              sz2,
+          );
         }
 
         if (pdfCount === 0 && pptxFiles.length === 0) {

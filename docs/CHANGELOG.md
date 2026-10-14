@@ -5,6 +5,14 @@ All notable changes to PESUClaw will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.3] - 2026-10-14
+
+### Added
+- Added `.zip`, `.rar`, and `.7z` archive detection without incorrectly renaming archives as PPTX files.
+- Added `merge_office_files.py` to Office-file ZIP bundles for ordered DOC, DOCX, and PPTX to PDF conversion and merging.
+- Added LibreOffice, Microsoft Office, and Python package fallbacks with explicit installation instructions.
+- Made the GitHub update prompt explicitly tell users to download and install new releases.
+
 ## [1.2.2] - 2026-08-11
 
 ### Changed
