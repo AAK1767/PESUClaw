@@ -53,6 +53,14 @@
       if (!$("#courselistunit").length) return;
       console.log("[PESUClaw] Injecting UI");
 
+      var PESUCLAW_VERSION = "1.2.3";
+      var latestReleaseUrl =
+        "https://api.github.com/repos/AAK1767/PESUClaw/releases/latest";
+      var releasePageUrl =
+        "https://github.com/AAK1767/PESUClaw/releases/latest";
+      var updateCacheKey = "pesuclaw.latestRelease";
+      var updateCacheTtl = 6 * 60 * 60 * 1000;
+
       // ─── State (per injection) ───
       var _fetching = false;
       var _lastRenderedTab = "";
@@ -80,6 +88,7 @@
 
       // Panel
       const container = $('<div id="pesu-dl-helper"></div>');
+      const updateNotice = $('<div class="pesu-dl-update"></div>').hide();
       const titleDiv = $('<div id="pesu-dl-title"></div>');
       const statusDiv = $('<div id="pesu-dl-status"></div>');
 
@@ -127,6 +136,7 @@
       container
         .append(topBar)
         .append(typeBar)
+        .append(updateNotice)
         .append(titleDiv)
         .append(statusDiv)
         .append(progressWrap)
@@ -136,6 +146,106 @@
         navBtn.removeClass("active");
       });
       $("body").append(container);
+
+      function compareVersions(left, right) {
+        var leftParts = String(left)
+          .replace(/^v/i, "")
+          .split(".")
+          .map(function (part) {
+            return parseInt(part, 10) || 0;
+          });
+        var rightParts = String(right)
+          .replace(/^v/i, "")
+          .split(".")
+          .map(function (part) {
+            return parseInt(part, 10) || 0;
+          });
+        var length = Math.max(leftParts.length, rightParts.length);
+        for (var index = 0; index < length; index++) {
+          if ((leftParts[index] || 0) > (rightParts[index] || 0)) return 1;
+          if ((leftParts[index] || 0) < (rightParts[index] || 0)) return -1;
+        }
+        return 0;
+      }
+
+      async function checkForUpdate() {
+        try {
+          var cachedUpdate = null;
+          try {
+            cachedUpdate = JSON.parse(
+              localStorage.getItem(updateCacheKey) || "null",
+            );
+          } catch (e) {
+            console.warn("[PESUClaw] Could not read update cache:", e);
+          }
+          if (
+            cachedUpdate &&
+            cachedUpdate.checkedAt &&
+            Date.now() - cachedUpdate.checkedAt < updateCacheTtl
+          ) {
+            showUpdateIfAvailable(cachedUpdate.release);
+            return;
+          }
+
+          var response = await fetch(latestReleaseUrl, {
+            headers: { Accept: "application/vnd.github+json" },
+          });
+          if (!response.ok) {
+            throw new Error("GitHub responded with " + response.status);
+          }
+          var release = await response.json();
+          var latestVersion = String(
+            release.tag_name || release.name || "",
+          ).replace(/^v/i, "");
+          if (!latestVersion) {
+            throw new Error("Could not determine the latest release version");
+          }
+          try {
+            localStorage.setItem(
+              updateCacheKey,
+              JSON.stringify({ checkedAt: Date.now(), release: release }),
+            );
+          } catch (e) {
+            console.warn("[PESUClaw] Could not save update cache:", e);
+          }
+          showUpdateIfAvailable(release);
+        } catch (error) {
+          console.warn("[PESUClaw] GitHub update check failed:", error);
+        }
+      }
+
+      function showUpdateIfAvailable(release) {
+        var latestVersion = String(
+          release.tag_name || release.name || "",
+        ).replace(/^v/i, "");
+        if (!latestVersion || compareVersions(latestVersion, PESUCLAW_VERSION) <= 0) {
+          return;
+        }
+          updateNotice
+            .empty()
+            .append(
+              $("<strong>").text(
+                "New PESUClaw release v" + latestVersion + " available. ",
+              ),
+            )
+            .append(
+              $("<span>").text(
+                "Download and install it to update the extension. ",
+              ),
+            )
+            .append(
+              $("<a>")
+                .attr({
+                  href: release.html_url || releasePageUrl,
+                  target: "_blank",
+                  rel: "noreferrer",
+                })
+                .text("Download update"),
+            )
+            .show();
+      }
+
+      checkForUpdate();
 
       // ─── Render from cache or trigger fetch ───
       function renderOrFetch() {
@@ -244,18 +354,22 @@
           ).text(idx + 1 + ". " + displayTitle);
 
           btn.on("click", function () {
-            var a = document.createElement("a");
-            a.href = t.isSlideUrl
-              ? t.id
-              : "/Academy/s/referenceMeterials/downloadcoursedoc/" + t.id;
-            a.download = "";
-            a.style.display = "none";
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            $(this)
-              .addClass("done")
-              .text(t.title + " \u2014 done");
+            var itemButton = $(this);
+            itemButton.prop("disabled", true).text(t.title + " \u2014 fetching");
+            downloadIndividualItem(t, idx)
+              .then(function () {
+                itemButton
+                  .prop("disabled", false)
+                  .addClass("done")
+                  .text(t.title + " \u2014 done");
+              })
+              .catch(function (error) {
+                console.error("[PESUClaw] Individual download failed:", error);
+                itemButton
+                  .prop("disabled", false)
+                  .addClass("failed")
+                  .text(t.title + " \u2014 failed");
+              });
           });
 
           contentArea.append(btn);
@@ -282,6 +396,19 @@
         return dotPos > 0 ? filename.slice(dotPos).toLowerCase() : "";
       }
 
+      function isArchiveExtension(extension) {
+        return [".zip", ".rar", ".7z", ".tar", ".gz", ".tgz"].indexOf(
+          extension,
+        ) >= 0;
+      }
+
+      function isSupportedFileExtension(extension) {
+        return (
+          isArchiveExtension(extension) ||
+          [".doc", ".docx", ".pptx"].indexOf(extension) >= 0
+        );
+      }
+
       function getArchiveExtension(header, filename, title) {
         var filenameExt = getFilenameExtension(filename);
         var titleExt = getFilenameExtension(title);
@@ -298,21 +425,30 @@
           header[2] === 0xbc &&
           header[3] === 0xaf &&
           header[4] === 0x27;
+        var isGzip = header[0] === 0x1f && header[1] === 0x8b;
+        var isTar =
+          header.length >= 262 &&
+          header[257] === 0x75 &&
+          header[258] === 0x73 &&
+          header[259] === 0x74 &&
+          header[260] === 0x61 &&
+          header[261] === 0x72;
 
         if (
           !isZip &&
           !isRar &&
           !is7z &&
-          titleExt !== ".zip" &&
-          titleExt !== ".rar" &&
-          titleExt !== ".7z"
+          !isGzip &&
+          !isTar &&
+          !isSupportedFileExtension(filenameExt) &&
+          !isSupportedFileExtension(titleExt)
         ) {
           return "";
         }
 
         // Preserve the server's actual file type for ZIP-based formats such as PPTX.
-        if (filenameExt) return filenameExt;
-        if (titleExt) return titleExt;
+        if (isSupportedFileExtension(filenameExt)) return filenameExt;
+        if (isSupportedFileExtension(titleExt)) return titleExt;
         if (isZip) return ".zip";
         if (
           isRar
@@ -324,7 +460,48 @@
         ) {
           return ".7z";
         }
+        if (isGzip) return ".gz";
+        if (isTar) return ".tar";
         return "";
+      }
+
+      function getGeneratedDownloadName(index, title, extension) {
+        var safeTitle =
+          title.replace(/[/\\:*?"<>|]/g, "_").trim() || "file";
+        var safeExtension = extension || getFilenameExtension(title) || ".bin";
+        if (safeTitle.toLowerCase().endsWith(safeExtension)) {
+          safeTitle = safeTitle.slice(0, -safeExtension.length).trim() || "file";
+        }
+        return index + 1 + "_" + safeTitle + safeExtension;
+      }
+
+      async function downloadIndividualItem(item, index) {
+        var url = item.isSlideUrl
+          ? item.id
+          : "/Academy/s/referenceMeterials/downloadcoursedoc/" + item.id;
+        var response = await fetch(url, { credentials: "same-origin" });
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        var arrayBuf = await response.arrayBuffer();
+        var header = new Uint8Array(arrayBuf.slice(0, 512));
+        var responseFilename = getResponseFilename(response);
+        var extension = getArchiveExtension(header, responseFilename, item.title);
+        if (!extension) {
+          extension =
+            header[0] === 0x25 &&
+            header[1] === 0x50 &&
+            header[2] === 0x44 &&
+            header[3] === 0x46
+              ? ".pdf"
+              : getOfficeExtension(responseFilename) ||
+                getOfficeExtension(item.title) ||
+                ".bin";
+        }
+        triggerDownload(
+          new Blob([arrayBuf], {
+            type: response.headers.get("Content-Type") || "application/octet-stream",
+          }),
+          getGeneratedDownloadName(index, item.title, extension),
+        );
       }
 
       function getOfficeExtension(filename) {
@@ -343,9 +520,8 @@
           "",
           "Uses LibreOffice when available. On Windows, Microsoft Word/PowerPoint",
           "can be used instead (requires desktop Microsoft Office and pywin32).",
-          'Install the PDF merger with: python -m pip install pypdf',
-          'Fallback PDF merger: python -m pip install PyPDF2',
-          'For the Microsoft Office fallback, also install: python -m pip install pywin32',
+          "If packages are missing, run the included launcher or:",
+          'python -m pip install -r requirements.txt',
           '"""',
           "from pathlib import Path",
           "import platform",
@@ -450,6 +626,41 @@
         ].join("\n");
       }
 
+      function createOfficeRequirements() {
+        return [
+          "pypdf",
+          "pywin32; platform_system == 'Windows'",
+          "",
+        ].join("\n");
+      }
+
+      function createWindowsMergeLauncher() {
+        return [
+          "@echo off",
+          "setlocal",
+          "py -m pip install -r requirements.txt",
+          "if errorlevel 1 python -m pip install -r requirements.txt",
+          "if errorlevel 1 (",
+          "  pause",
+          "  exit /b 1",
+          ")",
+          "py merge_office_files.py",
+          "if errorlevel 1 python merge_office_files.py",
+          "pause",
+          "",
+        ].join("\r\n");
+      }
+
+      function createUnixMergeLauncher() {
+        return [
+          "#!/usr/bin/env sh",
+          "set -eu",
+          "python3 -m pip install -r requirements.txt",
+          "python3 merge_office_files.py",
+          "",
+        ].join("\n");
+      }
+
       async function mergeAndDownload(unitText, items, typeName, btn) {
         if (!items.length) {
           statusDiv.text("Nothing to download");
@@ -466,6 +677,7 @@
           failed = 0;
         var pptxFiles = [];
         var officeFiles = [];
+        var archiveCount = 0;
         var usedNames = new Set();
 
         for (var i = 0; i < items.length; i++) {
@@ -490,7 +702,7 @@
             var resp = await fetch(url, { credentials: "same-origin" });
             if (!resp.ok) throw new Error("HTTP " + resp.status);
             var arrayBuf = await resp.arrayBuffer();
-            var hdr = new Uint8Array(arrayBuf.slice(0, 5));
+            var hdr = new Uint8Array(arrayBuf.slice(0, 512));
             var isPdf =
               hdr[0] === 0x25 &&
               hdr[1] === 0x50 &&
@@ -533,6 +745,7 @@
                   .text(item.title + " \u2014 error");
               }
             } else if (archiveExt) {
+              if (isArchiveExtension(archiveExt)) archiveCount++;
               // Build name: (number)_title.ext
               var safeTitle = item.title.replace(/[/\\:*?"<>|]/g, "_").trim();
               var zipEntryName = i + 1 + "_" + safeTitle + archiveExt;
@@ -657,6 +870,9 @@
               scriptName,
               createOfficeMergeScript(officeFiles, outputName),
             );
+            zip.file("requirements.txt", createOfficeRequirements());
+            zip.file("run_merge_windows.bat", createWindowsMergeLauncher());
+            zip.file("run_merge_linux.sh", createUnixMergeLauncher());
           }
           var zipBlob = await zip.generateAsync({ type: "blob" });
           triggerDownload(zipBlob, safeName + "_" + typeName + "_files.zip");
@@ -669,6 +885,20 @@
                 : "") +
               " \u00b7 " +
               sz2,
+          );
+        }
+
+        if (pdfCount > 0 || pptxFiles.length > 0) {
+          statusParts.unshift(
+            items.length -
+              failed +
+              " processed \u00b7 " +
+              pdfCount +
+              " PDFs merged \u00b7 " +
+              (pptxFiles.length - archiveCount) +
+              " Office/other files \u00b7 " +
+              archiveCount +
+              " archives",
           );
         }
 

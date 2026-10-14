@@ -5,6 +5,16 @@ All notable changes to PESUClaw will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.4] - 2026-10-14
+
+### Added
+- Added generated filenames for individual downloads so downloaded files match the numbered names used in bundles.
+- Added Office bundle setup files (`requirements.txt` and platform launchers) for installing dependencies and running the merge helper.
+- Added six-hour caching for GitHub release checks.
+- Added broader archive detection for ZIP, RAR, 7z, TAR, GZIP, and TGZ files.
+- Added detailed processing summaries for merged PDFs, Office files, archives, and failures.
+- Added a dark theme with improved contrast, spacing, controls, status colors, and keyboard focus states.
+
 ## [1.2.3] - 2026-10-14
 
 ### Added

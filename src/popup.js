@@ -9,6 +9,8 @@
   var footerEl = document.getElementById('version-footer');
   var latestReleaseUrl = 'https://api.github.com/repos/AAK1767/PESUClaw/releases/latest';
   var releasePageUrl = 'https://github.com/AAK1767/PESUClaw/releases/latest';
+  var updateCacheKey = 'pesuclaw.latestRelease';
+  var updateCacheTtl = 6 * 60 * 60 * 1000;
 
   if (footerEl) {
     footerEl.textContent = 'Installed v' + currentVersion;
@@ -63,6 +65,21 @@
     try {
       setStatus({ text: 'Checking GitHub for updates...' }, 'checking');
 
+      var cachedUpdate = null;
+      try {
+        cachedUpdate = JSON.parse(localStorage.getItem(updateCacheKey) || 'null');
+      } catch (error) {
+        console.warn('[PESUClaw] Could not read update cache:', error);
+      }
+      if (
+        cachedUpdate &&
+        cachedUpdate.checkedAt &&
+        Date.now() - cachedUpdate.checkedAt < updateCacheTtl
+      ) {
+        showReleaseStatus(cachedUpdate.release);
+        return;
+      }
+
       var response = await fetch(latestReleaseUrl, {
         headers: {
           Accept: 'application/vnd.github+json'
@@ -79,45 +96,57 @@
       if (!latestVersion) {
         throw new Error('Could not determine the latest release version');
       }
-
-      if (compareVersions(latestVersion, currentVersion) > 0) {
-        setStatus(
-          {
-            text: 'New release v' + latestVersion + ' is available. Download and install it to update PESUClaw.',
-            linkText: 'Download update',
-            linkUrl: release.html_url || releasePageUrl
-          },
-          'available'
-        );
-
-        if (actionApi && actionApi.setBadgeText) {
-          actionApi.setBadgeText({ text: 'UPD' });
-          if (actionApi.setBadgeBackgroundColor) {
-            actionApi.setBadgeBackgroundColor({ color: '#c62828' });
-          }
-          if (actionApi.setTitle) {
-            actionApi.setTitle({ title: 'PESUClaw update available: v' + latestVersion });
-          }
-        }
-        return;
+      try {
+      localStorage.setItem(
+        updateCacheKey,
+        JSON.stringify({ checkedAt: Date.now(), release: release })
+      );
+      } catch (error) {
+      console.warn('[PESUClaw] Could not save update cache:', error);
       }
-
-      setStatus({ text: 'You are on the latest release.' }, 'ready');
-
-      if (actionApi && actionApi.setBadgeText) {
-        actionApi.setBadgeText({ text: '' });
-        if (actionApi.setTitle) {
-          actionApi.setTitle({ title: 'PESUClaw v' + currentVersion });
-        }
-      }
+      showReleaseStatus(release);
     } catch (error) {
       setStatus(
-        {
-          text: 'Could not check GitHub releases. '
-        },
-        'error'
+      {
+        text: 'Could not check GitHub releases. '
+      },
+      'error'
       );
       statusEl.appendChild(document.createTextNode(error && error.message ? error.message : ''));
+    }
+  }
+
+  function showReleaseStatus(release) {
+    var latestVersion = normalizeVersion(release.tag_name || release.name || '');
+    if (compareVersions(latestVersion, currentVersion) > 0) {
+      setStatus(
+        {
+          text: 'New release v' + latestVersion + ' is available. Download and install it to update PESUClaw.',
+          linkText: 'Download update',
+          linkUrl: release.html_url || releasePageUrl
+        },
+        'available'
+      );
+
+      if (actionApi && actionApi.setBadgeText) {
+        actionApi.setBadgeText({ text: 'UPD' });
+        if (actionApi.setBadgeBackgroundColor) {
+          actionApi.setBadgeBackgroundColor({ color: '#c62828' });
+        }
+        if (actionApi.setTitle) {
+          actionApi.setTitle({ title: 'PESUClaw update available: v' + latestVersion });
+        }
+      }
+      return;
+    }
+
+    setStatus({ text: 'You are on the latest release.' }, 'ready');
+
+    if (actionApi && actionApi.setBadgeText) {
+      actionApi.setBadgeText({ text: '' });
+      if (actionApi.setTitle) {
+        actionApi.setTitle({ title: 'PESUClaw v' + currentVersion });
+      }
     }
   }
 

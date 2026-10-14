@@ -9,12 +9,16 @@ A browser extension for **Chrome** and **Firefox** that adds bulk downloading of
 - **PDF merge** — all PDF files combined into a single file via pdf-lib
 - **ZIP bundling** — non-PDF files (PPTX, DOC, DOCX, archives, etc.) bundled into one ZIP via JSZip
 - **Office merge helper** — bundles containing DOC, DOCX, or PPTX files include `merge_office_files.py`, which uses LibreOffice or Microsoft Office on Windows and `pypdf` to convert and merge them in numbered order
+- **Office setup helpers** — Office bundles also include `requirements.txt`, `run_merge_windows.bat`, and `run_merge_linux.sh` to install Python dependencies and run the merge helper
 - **Individual downloads** — click any file to download it separately
+- **Generated filenames** — individual downloads use the same numbered, descriptive names as bundled files instead of opaque server filenames
 - **Caching** — switching between unit tabs and resource types is instant after the first fetch
 - **Auto-detect** — panel updates automatically when you switch unit tabs
 - **Progress tracking** — visual progress bar while scanning and downloading
 - **Smart naming** — ZIP entries named `(number)_title.ext` with duplicate disambiguation
-- **GitHub update check** — the extension popup checks the latest GitHub release and explicitly links to the download when a newer version is available
+- **GitHub update check** — the extension popup and PESUClaw course tab check the latest GitHub release and explicitly link to the download when a newer version is available
+- **Cached update checks** — GitHub release results are cached for six hours to avoid repeated API requests
+- **Dark theme** — the downloader panel and browser popup use a consistent dark interface with high-contrast status colors
 
 ## Installation
 
@@ -85,7 +89,7 @@ All processing happens in your browser. No data is sent to any third-party serve
 
 - Only PDF files can be merged directly.
 - If a file is anything other than PDF (for example PPTX, DOC, DOCX, etc.), it is added to a ZIP instead of being converted.
-- Office-file ZIP bundles include a Python helper. If the PDF merger package is missing, run `python -m pip install pypdf` (or `python -m pip install PyPDF2`). LibreOffice is preferred, but Windows users can use desktop Microsoft Office instead by installing `python -m pip install pywin32`.
+- Office-file ZIP bundles include a Python helper and launchers. Run `run_merge_windows.bat` on Windows or `./run_merge_linux.sh` on Linux/macOS; they install the packages from `requirements.txt` with `pip` before running the merge. LibreOffice is preferred, but Windows users can use desktop Microsoft Office instead.
 - Converting office formats to PDF inside a browser extension is not reliably possible on the web without external conversion services, so PESUClaw does not attempt in-extension conversion.
 
 ## Supported resource types
