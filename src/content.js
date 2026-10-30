@@ -53,13 +53,19 @@
       if (!$("#courselistunit").length) return;
       console.log("[PESUClaw] Injecting UI");
 
-      var PESUCLAW_VERSION = "1.2.3";
+      var PESUCLAW_VERSION = "1.2.7";
       var latestReleaseUrl =
         "https://api.github.com/repos/AAK1767/PESUClaw/releases/latest";
-      var releasePageUrl =
-        "https://github.com/AAK1767/PESUClaw/releases/latest";
+      var repoUrl = "https://github.com/AAK1767/PESUClaw";
+      var releasePageUrl = repoUrl + "/releases/latest";
+      // Fallback that avoids GitHub API rate limits (tags only, CORS-enabled)
+      var jsdelivrTagsUrls = [
+        "https://data.jsdelivr.com/v1/packages/gh/AAK1767/PESUClaw",
+        "https://data.jsdelivr.com/v1/package/gh/AAK1767/PESUClaw",
+      ];
       var updateCacheKey = "pesuclaw.latestRelease";
       var updateCacheTtl = 6 * 60 * 60 * 1000;
+      var updateFailureTtl = 30 * 60 * 1000;
 
       // ─── State (per injection) ───
       var _fetching = false;
@@ -97,6 +103,31 @@
       progressWrap.append(progressBar);
 
       const contentArea = $('<div id="pesu-dl-content"></div>');
+
+      // Footer: version + links to GitHub releases
+      const footerStatus = $("<span></span>");
+      const footer = $('<div class="pesu-dl-footer"></div>').css({
+        marginTop: "12px",
+        paddingTop: "8px",
+        borderTop: "1px solid rgba(128,128,128,0.25)",
+        fontSize: "11px",
+        textAlign: "center",
+        opacity: "0.75",
+      });
+      footer
+        .append(document.createTextNode("PESUClaw v" + PESUCLAW_VERSION + " \u00b7 "))
+        .append(
+          $("<a>")
+            .attr({ href: releasePageUrl, target: "_blank", rel: "noreferrer" })
+            .text("Latest releases"),
+        )
+        .append(document.createTextNode(" \u00b7 "))
+        .append(
+          $("<a>")
+            .attr({ href: repoUrl, target: "_blank", rel: "noreferrer" })
+            .text("GitHub"),
+        )
+        .append(footerStatus);
 
       const topBar = $('<div class="pesu-dl-topbar"></div>');
       const refetchBtn = $(
@@ -140,7 +171,8 @@
         .append(titleDiv)
         .append(statusDiv)
         .append(progressWrap)
-        .append(contentArea);
+        .append(contentArea)
+        .append(footer);
       closeBtn.on("click", function () {
         container.slideUp(200);
         navBtn.removeClass("active");
@@ -168,6 +200,70 @@
         return 0;
       }
 
+      function fetchJson(url, timeoutMs) {
+        var controller = new AbortController();
+        var timer = setTimeout(function () {
+          controller.abort();
+        }, timeoutMs || 8000);
+        // No custom headers on purpose: keeps it a simple CORS request.
+        return fetch(url, { signal: controller.signal, cache: "no-store" })
+          .then(function (response) {
+            if (!response.ok) {
+              throw new Error(url + " responded with " + response.status);
+            }
+            return response.json();
+          })
+          .finally(function () {
+            clearTimeout(timer);
+          });
+      }
+
+      async function fetchLatestRelease() {
+        var errors = [];
+
+        // 1) GitHub releases API
+        try {
+          var release = await fetchJson(latestReleaseUrl);
+          if (release && (release.tag_name || release.name)) return release;
+          errors.push("GitHub API returned no release");
+        } catch (e) {
+          errors.push(String(e && e.message ? e.message : e));
+        }
+
+        // 2) jsDelivr tag list (no GitHub rate limit)
+        for (var i = 0; i < jsdelivrTagsUrls.length; i++) {
+          try {
+            var data = await fetchJson(jsdelivrTagsUrls[i]);
+            var versions = (data && data.versions ? data.versions : [])
+              .map(function (v) {
+                return String(v && v.version ? v.version : v);
+              })
+              .filter(function (v) {
+                return /^v?\d+(\.\d+)*$/.test(v);
+              });
+            if (versions.length) {
+              versions.sort(compareVersions);
+              var newest = versions[versions.length - 1];
+              return {
+                tag_name: newest,
+                html_url: repoUrl + "/releases/tag/" + newest,
+              };
+            }
+            errors.push("jsDelivr returned no tags");
+          } catch (e2) {
+            errors.push(String(e2 && e2.message ? e2.message : e2));
+          }
+        }
+
+        throw new Error(errors.join(" | "));
+      }
+
+      function setUpdateCheckFailed(message) {
+        footerStatus
+          .text(" \u00b7 update check unavailable")
+          .attr("title", message || "");
+      }
+
       async function checkForUpdate() {
         try {
           var cachedUpdate = null;
@@ -178,28 +274,19 @@
           } catch (e) {
             console.warn("[PESUClaw] Could not read update cache:", e);
           }
-          if (
-            cachedUpdate &&
-            cachedUpdate.checkedAt &&
-            Date.now() - cachedUpdate.checkedAt < updateCacheTtl
-          ) {
-            showUpdateIfAvailable(cachedUpdate.release);
-            return;
+          if (cachedUpdate && cachedUpdate.checkedAt) {
+            var age = Date.now() - cachedUpdate.checkedAt;
+            if (cachedUpdate.release && age < updateCacheTtl) {
+              showUpdateIfAvailable(cachedUpdate.release);
+              return;
+            }
+            if (cachedUpdate.failed && age < updateFailureTtl) {
+              setUpdateCheckFailed(cachedUpdate.message);
+              return;
+            }
           }
 
-          var response = await fetch(latestReleaseUrl, {
-            headers: { Accept: "application/vnd.github+json" },
-          });
-          if (!response.ok) {
-            throw new Error("GitHub responded with " + response.status);
-          }
-          var release = await response.json();
-          var latestVersion = String(
-            release.tag_name || release.name || "",
-          ).replace(/^v/i, "");
-          if (!latestVersion) {
-            throw new Error("Could not determine the latest release version");
-          }
+          var release = await fetchLatestRelease();
           try {
             localStorage.setItem(
               updateCacheKey,
@@ -210,7 +297,18 @@
           }
           showUpdateIfAvailable(release);
         } catch (error) {
-          console.warn("[PESUClaw] GitHub update check failed:", error);
+          console.warn("[PESUClaw] Update check failed:", error);
+          setUpdateCheckFailed(String(error && error.message ? error.message : error));
+          try {
+            localStorage.setItem(
+              updateCacheKey,
+              JSON.stringify({
+                checkedAt: Date.now(),
+                failed: true,
+                message: String(error && error.message ? error.message : error),
+              }),
+            );
+          } catch (e) {}
         }
       }
 
@@ -218,7 +316,9 @@
         var latestVersion = String(
           release.tag_name || release.name || "",
         ).replace(/^v/i, "");
-        if (!latestVersion || compareVersions(latestVersion, PESUCLAW_VERSION) <= 0) {
+        if (!latestVersion) return;
+        if (compareVersions(latestVersion, PESUCLAW_VERSION) <= 0) {
+          footerStatus.text(" \u00b7 up to date").attr("title", "");
           return;
         }
           updateNotice
@@ -469,22 +569,62 @@
           return ".pptx";
         }
 
-        var header = new Uint8Array(arrayBuf.slice(0, 4));
-        if (header[0] !== 0x50 || header[1] !== 0x4b) return "";
+        if (
+          mime ===
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ) {
+          return ".xlsx";
+        }
 
+        return sniffContainerExtension(arrayBuf);
+      }
+
+      // Detects Office / OpenDocument / EPUB files from their raw bytes.
+      // ZIP stores entry names uncompressed, so no JSZip is needed, and it
+      // also works for templates/slideshows (.dotx, .ppsx) and odd writers.
+      function sniffContainerExtension(arrayBuf) {
         try {
-          var archive = await JSZip.loadAsync(arrayBuf);
-          var contentTypes = archive.file("[Content_Types].xml");
-          if (!contentTypes) return "";
-          var contentTypesText = await contentTypes.async("text");
-          if (contentTypesText.includes("wordprocessingml.document")) {
-            return ".docx";
+          var h = new Uint8Array(arrayBuf.slice(0, 8));
+          var isPK = h[0] === 0x50 && h[1] === 0x4b;
+          var isOLE =
+            h[0] === 0xd0 && h[1] === 0xcf && h[2] === 0x11 && h[3] === 0xe0;
+
+          if (isPK) {
+            var text = new TextDecoder("latin1").decode(
+              new Uint8Array(arrayBuf),
+            );
+            if (text.indexOf("word/document.xml") >= 0) return ".docx";
+            if (text.indexOf("ppt/presentation.xml") >= 0) return ".pptx";
+            if (text.indexOf("xl/workbook.xml") >= 0) return ".xlsx";
+            if (text.indexOf("application/vnd.oasis.opendocument.text") >= 0)
+              return ".odt";
+            if (
+              text.indexOf("application/vnd.oasis.opendocument.presentation") >= 0
+            )
+              return ".odp";
+            if (
+              text.indexOf("application/vnd.oasis.opendocument.spreadsheet") >= 0
+            )
+              return ".ods";
+            if (text.indexOf("application/epub+zip") >= 0) return ".epub";
+            return "";
           }
-          if (contentTypesText.includes("presentationml.presentation")) {
-            return ".pptx";
+
+          if (isOLE) {
+            var len = arrayBuf.byteLength - (arrayBuf.byteLength % 2);
+            var wide = new TextDecoder("utf-16le").decode(
+              new Uint8Array(arrayBuf, 0, len),
+            );
+            if (wide.indexOf("PowerPoint Document") >= 0) return ".ppt";
+            if (wide.indexOf("WordDocument") >= 0) return ".doc";
+            if (
+              wide.indexOf("Workbook") >= 0 ||
+              wide.indexOf("Book") >= 0
+            )
+              return ".xls";
           }
         } catch (error) {
-          console.warn("[PESUClaw] Could not inspect ZIP Office metadata:", error);
+          console.warn("[PESUClaw] Could not sniff file type:", error);
         }
         return "";
       }
@@ -515,6 +655,7 @@
           response.headers.get("Content-Type"),
         );
         var extension = officeExtension ||
+          getPreservedExtension(responseFilename, item.title) ||
           getArchiveExtension(header, responseFilename, item.title);
         if (!extension) {
           extension =
@@ -533,10 +674,30 @@
         );
       }
 
+      var KNOWN_TITLE_EXTENSIONS = [
+        ".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".csv",
+        ".txt", ".rtf", ".odt", ".odp", ".ods", ".epub", ".png", ".jpg",
+        ".jpeg", ".gif", ".svg", ".mp4", ".mp3", ".py", ".java", ".c",
+        ".cpp", ".js", ".html", ".json", ".xml", ".md", ".ipynb", ".sql",
+      ];
+
+      // Returns the file's real (non-archive) extension from the server
+      // filename or the title, or "" if none can be trusted.
+      function getPreservedExtension(filename, title) {
+        var fnExt = getFilenameExtension(filename || "");
+        if (/^\.[a-z][a-z0-9]{0,5}$/.test(fnExt) && !isArchiveExtension(fnExt)) {
+          return fnExt;
+        }
+        var titleExt = getFilenameExtension(title || "");
+        if (KNOWN_TITLE_EXTENSIONS.indexOf(titleExt) >= 0) return titleExt;
+        return "";
+      }
+
       function getOfficeExtension(filename) {
         var extension = getFilenameExtension(filename);
         return extension === ".doc" ||
           extension === ".docx" ||
+          extension === ".ppt" ||
           extension === ".pptx"
           ? extension
           : "";
@@ -602,7 +763,7 @@
           "            if document is not None:",
           "                document.Close(False)",
           "            word.Quit()",
-          "    elif extension == '.pptx':",
+          "    elif extension in ('.ppt', '.pptx'):",
           "        powerpoint = win32com.client.DispatchEx('PowerPoint.Application')",
           "        presentation = None",
           "        try:",
@@ -744,13 +905,27 @@
               item.title,
               resp.headers.get("Content-Type"),
             );
-            var archiveExt = officeExtension
+            var preservedExt =
+              officeExtension ||
+              getPreservedExtension(responseFilename, item.title);
+            var archiveExt = preservedExt
               ? ""
               : getArchiveExtension(
                   hdr,
                   responseFilename,
                   item.title,
                 );
+
+            if (archiveExt === ".zip" && !isPdf) {
+              console.warn(
+                "[PESUClaw] Treating as ZIP:",
+                item.title,
+                "| filename:",
+                responseFilename,
+                "| type:",
+                resp.headers.get("Content-Type"),
+              );
+            }
 
             if (isPdf) {
               try {
@@ -804,27 +979,23 @@
                 .text(item.title + " \u2014 zipped");
             } else {
               // Not PDF or archive — detect type from magic bytes / headers and add to ZIP bundle
-              var otherFilename = responseFilename;
-              if (!otherFilename) {
-                otherFilename = item.title.replace(/[/\\:*?"<>|]/g, "_");
+              var otherExt = preservedExt;
+              if (!otherExt) {
                 // Guess extension from magic bytes
                 var isDOC =
                   hdr[0] === 0xd0 &&
                   hdr[1] === 0xcf &&
                   hdr[2] === 0x11 &&
                   hdr[3] === 0xe0;
-                if (officeExtension) otherFilename += officeExtension;
-                else if (isDOC) otherFilename += ".doc";
-                else otherFilename += ".bin";
+                otherExt = isDOC ? ".doc" : ".bin";
               }
-              // Extract extension and rebuild with (number)_title format
-              var otherExt = "";
-              var otherDotPos = otherFilename.lastIndexOf(".");
-              otherExt =
-                otherDotPos > 0 ? otherFilename.slice(otherDotPos) : ".bin";
               var safeOtherTitle = item.title
                 .replace(/[/\\:*?"<>|]/g, "_")
                 .trim();
+              if (safeOtherTitle.toLowerCase().endsWith(otherExt)) {
+                safeOtherTitle =
+                  safeOtherTitle.slice(0, -otherExt.length).trim() || "file";
+              }
               var otherEntryName = i + 1 + "_" + safeOtherTitle + otherExt;
               var otherFinal = otherEntryName,
                 otherCounter = 1;
@@ -903,7 +1074,7 @@
           });
           if (officeFiles.length > 0) {
             var scriptName = "merge_office_files.py";
-            var outputName = safeName + "_" + typeName + "_Merged.pdf";
+            var outputName = safeName + "_" + typeName + "_Office_Merged.pdf";
             zip.file(
               scriptName,
               createOfficeMergeScript(officeFiles, outputName),

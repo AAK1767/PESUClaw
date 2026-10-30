@@ -5,6 +5,12 @@ All notable changes to PESUClaw will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.7] - 2026-10-30
+
+### Changed
+- Added a visible version footer with links to the GitHub repository and releases.
+- Added jsDelivr tag metadata fallbacks and shorter retry caching for release update checks when the GitHub API is unavailable or rate-limited.
+
 ## [1.2.6] - 2026-10-30
 
 ### Fixed
