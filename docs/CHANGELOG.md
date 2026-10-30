@@ -5,6 +5,13 @@ All notable changes to PESUClaw will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.6] - 2026-10-30
+
+### Fixed
+- Fixed Office files being saved as `.zip` when the download response did not expose a useful filename or MIME type.
+- Inspected ZIP Office metadata to preserve `.docx` and `.pptx` extensions while keeping genuine ZIP archives as `.zip`.
+- Continued including `merge_office_files.py` and its setup helpers whenever Office files are bundled.
+
 ## [1.2.5] - 2026-10-30
 
 ### Fixed

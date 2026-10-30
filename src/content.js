@@ -402,26 +402,9 @@
         ) >= 0;
       }
 
-      function getArchiveExtension(header, filename, title, contentType) {
+      function getArchiveExtension(header, filename, title) {
         var filenameExt = getFilenameExtension(filename);
         var titleExt = getFilenameExtension(title);
-        var mime = String(contentType || "").toLowerCase().split(";")[0].trim();
-        var mimeOfficeExt =
-          mime === "application/msword"
-            ? ".doc"
-            : mime ===
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-              ? ".docx"
-              : mime ===
-                  "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-                ? ".pptx"
-                : "";
-        var officeExt =
-          [".doc", ".docx", ".pptx"].indexOf(filenameExt) >= 0
-            ? filenameExt
-            : [".doc", ".docx", ".pptx"].indexOf(titleExt) >= 0
-              ? titleExt
-              : mimeOfficeExt;
         var isZip = header[0] === 0x50 && header[1] === 0x4b;
         var isRar =
           header[0] === 0x52 &&
@@ -444,8 +427,6 @@
           header[260] === 0x61 &&
           header[261] === 0x72;
 
-        // DOCX and PPTX are ZIP containers internally, but must remain Office files.
-        if (officeExt) return "";
         if (isArchiveExtension(filenameExt)) return filenameExt;
         if (isArchiveExtension(titleExt)) return titleExt;
         if (isZip) return ".zip";
@@ -453,6 +434,58 @@
         if (is7z) return ".7z";
         if (isGzip) return ".gz";
         if (isTar) return ".tar";
+        return "";
+      }
+
+      async function getOfficeExtensionFromFile(
+        arrayBuf,
+        filename,
+        title,
+        contentType,
+      ) {
+        var filenameExtension = getOfficeExtension(filename);
+        if (filenameExtension) return filenameExtension;
+
+        var titleExtension = getOfficeExtension(title);
+        if (titleExtension) return titleExtension;
+
+        var mime = String(contentType || "").toLowerCase().split(";")[0].trim();
+        if (
+          mime === "application/msword" ||
+          mime === "application/vnd.ms-word"
+        ) {
+          return ".doc";
+        }
+        if (
+          mime ===
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ) {
+          return ".docx";
+        }
+        if (
+          mime ===
+          "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        ) {
+          return ".pptx";
+        }
+
+        var header = new Uint8Array(arrayBuf.slice(0, 4));
+        if (header[0] !== 0x50 || header[1] !== 0x4b) return "";
+
+        try {
+          var archive = await JSZip.loadAsync(arrayBuf);
+          var contentTypes = archive.file("[Content_Types].xml");
+          if (!contentTypes) return "";
+          var contentTypesText = await contentTypes.async("text");
+          if (contentTypesText.includes("wordprocessingml.document")) {
+            return ".docx";
+          }
+          if (contentTypesText.includes("presentationml.presentation")) {
+            return ".pptx";
+          }
+        } catch (error) {
+          console.warn("[PESUClaw] Could not inspect ZIP Office metadata:", error);
+        }
         return "";
       }
 
@@ -475,12 +508,14 @@
         var arrayBuf = await response.arrayBuffer();
         var header = new Uint8Array(arrayBuf.slice(0, 512));
         var responseFilename = getResponseFilename(response);
-        var extension = getArchiveExtension(
-          header,
+        var officeExtension = await getOfficeExtensionFromFile(
+          arrayBuf,
           responseFilename,
           item.title,
           response.headers.get("Content-Type"),
         );
+        var extension = officeExtension ||
+          getArchiveExtension(header, responseFilename, item.title);
         if (!extension) {
           extension =
             header[0] === 0x25 &&
@@ -488,9 +523,7 @@
             header[2] === 0x44 &&
             header[3] === 0x46
               ? ".pdf"
-              : getOfficeExtension(responseFilename) ||
-                getOfficeExtension(item.title) ||
-                ".bin";
+              : ".bin";
         }
         triggerDownload(
           new Blob([arrayBuf], {
@@ -705,12 +738,19 @@
               hdr[2] === 0x44 &&
               hdr[3] === 0x46;
             var responseFilename = getResponseFilename(resp);
-            var archiveExt = getArchiveExtension(
-              hdr,
+            var officeExtension = await getOfficeExtensionFromFile(
+              arrayBuf,
               responseFilename,
               item.title,
               resp.headers.get("Content-Type"),
             );
+            var archiveExt = officeExtension
+              ? ""
+              : getArchiveExtension(
+                  hdr,
+                  responseFilename,
+                  item.title,
+                );
 
             if (isPdf) {
               try {
@@ -773,7 +813,8 @@
                   hdr[1] === 0xcf &&
                   hdr[2] === 0x11 &&
                   hdr[3] === 0xe0;
-                if (isDOC) otherFilename += ".doc";
+                if (officeExtension) otherFilename += officeExtension;
+                else if (isDOC) otherFilename += ".doc";
                 else otherFilename += ".bin";
               }
               // Extract extension and rebuild with (number)_title format
