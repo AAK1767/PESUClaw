@@ -402,16 +402,26 @@
         ) >= 0;
       }
 
-      function isSupportedFileExtension(extension) {
-        return (
-          isArchiveExtension(extension) ||
-          [".doc", ".docx", ".pptx"].indexOf(extension) >= 0
-        );
-      }
-
-      function getArchiveExtension(header, filename, title) {
+      function getArchiveExtension(header, filename, title, contentType) {
         var filenameExt = getFilenameExtension(filename);
         var titleExt = getFilenameExtension(title);
+        var mime = String(contentType || "").toLowerCase().split(";")[0].trim();
+        var mimeOfficeExt =
+          mime === "application/msword"
+            ? ".doc"
+            : mime ===
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              ? ".docx"
+              : mime ===
+                  "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                ? ".pptx"
+                : "";
+        var officeExt =
+          [".doc", ".docx", ".pptx"].indexOf(filenameExt) >= 0
+            ? filenameExt
+            : [".doc", ".docx", ".pptx"].indexOf(titleExt) >= 0
+              ? titleExt
+              : mimeOfficeExt;
         var isZip = header[0] === 0x50 && header[1] === 0x4b;
         var isRar =
           header[0] === 0x52 &&
@@ -434,32 +444,13 @@
           header[260] === 0x61 &&
           header[261] === 0x72;
 
-        if (
-          !isZip &&
-          !isRar &&
-          !is7z &&
-          !isGzip &&
-          !isTar &&
-          !isSupportedFileExtension(filenameExt) &&
-          !isSupportedFileExtension(titleExt)
-        ) {
-          return "";
-        }
-
-        // Preserve the server's actual file type for ZIP-based formats such as PPTX.
-        if (isSupportedFileExtension(filenameExt)) return filenameExt;
-        if (isSupportedFileExtension(titleExt)) return titleExt;
+        // DOCX and PPTX are ZIP containers internally, but must remain Office files.
+        if (officeExt) return "";
+        if (isArchiveExtension(filenameExt)) return filenameExt;
+        if (isArchiveExtension(titleExt)) return titleExt;
         if (isZip) return ".zip";
-        if (
-          isRar
-        ) {
-          return ".rar";
-        }
-        if (
-          is7z
-        ) {
-          return ".7z";
-        }
+        if (isRar) return ".rar";
+        if (is7z) return ".7z";
         if (isGzip) return ".gz";
         if (isTar) return ".tar";
         return "";
@@ -484,7 +475,12 @@
         var arrayBuf = await response.arrayBuffer();
         var header = new Uint8Array(arrayBuf.slice(0, 512));
         var responseFilename = getResponseFilename(response);
-        var extension = getArchiveExtension(header, responseFilename, item.title);
+        var extension = getArchiveExtension(
+          header,
+          responseFilename,
+          item.title,
+          response.headers.get("Content-Type"),
+        );
         if (!extension) {
           extension =
             header[0] === 0x25 &&
@@ -713,6 +709,7 @@
               hdr,
               responseFilename,
               item.title,
+              resp.headers.get("Content-Type"),
             );
 
             if (isPdf) {
