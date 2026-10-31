@@ -53,7 +53,7 @@
       if (!$("#courselistunit").length) return;
       console.log("[PESUClaw] Injecting UI");
 
-      var PESUCLAW_VERSION = "1.2.7";
+      var PESUCLAW_VERSION = "1.3.0";
       var latestReleaseUrl =
         "https://api.github.com/repos/AAK1767/PESUClaw/releases/latest";
       var repoUrl = "https://github.com/AAK1767/PESUClaw";
@@ -71,6 +71,9 @@
       var _fetching = false;
       var _lastRenderedTab = "";
       var _fetchVersion = 0;
+      var _bulkRunning = false;
+      var _bulkCancel = false;
+      var unitLabels = {}; // unitKey -> display label (title or text of the tab)
 
       // Resource types (excluding AV Summary and Live Videos)
       var RESOURCE_TYPES = [
@@ -80,7 +83,7 @@
         { id: "6", label: "QB" },
         { id: "7", label: "QA" },
       ];
-      var selectedType = "2";
+      var selectedTypes = ["2"]; // several types can be selected at once
 
       // ─── Build DOM ───
       $("#pesu-dl-helper").remove();
@@ -101,6 +104,14 @@
       const progressWrap = $('<div class="pesu-dl-progress-wrap"></div>');
       const progressBar = $('<div class="pesu-dl-progress-bar"></div>');
       progressWrap.append(progressBar);
+      const cancelBtn = $('<button class="pesu-dl-btn-cancel"></button>')
+        .text("Cancel")
+        .css({ margin: "6px 0", fontSize: "12px" })
+        .hide()
+        .on("click", function () {
+          _bulkCancel = true;
+          statusDiv.text("Cancelling...");
+        });
 
       const contentArea = $('<div id="pesu-dl-content"></div>');
 
@@ -138,19 +149,26 @@
       );
       topBar.append(refetchBtn).append(closeBtn);
 
-      // ─── Type toggle bar (single-select) ───
+      // ─── Type toggle bar (multi-select) ───
       var typeBar = $('<div class="pesu-dl-type-bar"></div>');
       RESOURCE_TYPES.forEach(function (rt) {
         var tbtn = $('<button class="pesu-dl-type-btn"></button>')
           .text(rt.label)
-          .attr("data-type-id", rt.id);
-        if (selectedType === rt.id) tbtn.addClass("selected");
+          .attr("data-type-id", rt.id)
+          .attr("title", "Click to add or remove. Select several to download them together.");
+        if (selectedTypes.indexOf(rt.id) >= 0) tbtn.addClass("selected");
         tbtn.on("click", function () {
+          if (_bulkRunning) return;
           var tid = $(this).attr("data-type-id");
-          if (tid === selectedType) return;
-          selectedType = tid;
-          typeBar.find(".pesu-dl-type-btn").removeClass("selected");
-          $(this).addClass("selected");
+          var pos = selectedTypes.indexOf(tid);
+          if (pos >= 0) {
+            if (selectedTypes.length === 1) return; // keep at least one
+            selectedTypes.splice(pos, 1);
+            $(this).removeClass("selected");
+          } else {
+            selectedTypes.push(tid);
+            $(this).addClass("selected");
+          }
           // Cancel any in-progress fetch
           if (_fetching) {
             _fetchVersion++;
@@ -171,6 +189,7 @@
         .append(titleDiv)
         .append(statusDiv)
         .append(progressWrap)
+        .append(cancelBtn)
         .append(contentArea)
         .append(footer);
       closeBtn.on("click", function () {
@@ -349,12 +368,17 @@
 
       // ─── Render from cache or trigger fetch ───
       function renderOrFetch() {
-        var activeUnitText = getActiveUnitText();
-        var cachedUnit = cache[activeUnitText];
-        if (!cachedUnit || !cachedUnit.hasOwnProperty(selectedType)) {
+        var unitKey = getActiveUnitText();
+        var cachedUnit = cache[unitKey];
+        var missing =
+          !cachedUnit ||
+          selectedTypes.some(function (tid) {
+            return !cachedUnit.hasOwnProperty(tid);
+          });
+        if (missing) {
           fetchAndRender();
         } else {
-          renderItems(activeUnitText, cachedUnit, true);
+          renderItems(unitKey, cachedUnit, true);
         }
       }
 
@@ -390,89 +414,317 @@
         );
       }
 
-      // ─── Render items for the selected type ───
-      function renderItems(unitText, itemsByType, fromCache) {
-        _lastRenderedTab = unitText;
+      // ─── Unit / selection helpers ───
+      var UNIT_ROW_RE =
+        /handleclasscoursecontentunit\s*\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]/;
+
+      function sleep(ms) {
+        return new Promise(function (resolve) {
+          setTimeout(resolve, ms);
+        });
+      }
+
+      function getSelectedTypeObjs() {
+        return RESOURCE_TYPES.filter(function (rt) {
+          return selectedTypes.indexOf(rt.id) >= 0;
+        });
+      }
+
+      function isItemSelected(item) {
+        return item.selected !== false;
+      }
+
+      function safeFileName(text, fallback) {
+        return (
+          String(text || "").replace(/[^a-zA-Z0-9 _-]/g, "").trim() ||
+          fallback ||
+          "files"
+        );
+      }
+
+      function setItemState(item, cls, text) {
+        if (!item || !item._uid) return;
+        $("#" + item._uid)
+          .removeClass()
+          .addClass("pesu-dl-item " + cls)
+          .text(text);
+      }
+
+      function isUnitAnchor(el) {
+        return (
+          $(el).closest("#pesu-dl-tab-btn").length === 0 &&
+          /handleclassUnit\s*\(/.test($(el).attr("onclick") || "")
+        );
+      }
+
+      function getUnitAnchors() {
+        return $("#courselistunit li a").filter(function () {
+          return isUnitAnchor(this);
+        });
+      }
+
+      function getActiveUnitAnchor() {
+        return $("#courselistunit li.active a")
+          .filter(function () {
+            return isUnitAnchor(this);
+          })
+          .first();
+      }
+
+      function parseUnitId($a) {
+        var m = ($a.attr("onclick") || "").match(
+          /handleclassUnit\s*\(\s*['"]([^'"]+)['"]/,
+        );
+        return m ? m[1] : null;
+      }
+
+      function getUnitLabel($a) {
+        return $a.attr("title") || $a.text().trim();
+      }
+
+      function getActiveUnitId() {
+        var $a = getActiveUnitAnchor();
+        return $a.length ? parseUnitId($a) : null;
+      }
+
+      function countUnitRows(unitId) {
+        var n = 0;
+        $('#CourseContentId [onclick*="handleclasscoursecontentunit"]').each(
+          function () {
+            var m = ($(this).attr("onclick") || "").match(UNIT_ROW_RE);
+            if (m && m[3] === unitId) n++;
+          },
+        );
+        return n;
+      }
+
+      // PESU switches the active unit tab first and then updates
+      // #CourseContentId asynchronously, so wait until the rows on screen
+      // really belong to the unit we want.
+      async function waitForUnitReady(unitId, isCancelled, maxAttempts) {
+        for (var attempt = 0; attempt < maxAttempts; attempt++) {
+          if (isCancelled()) return "cancelled";
+          if (getActiveUnitId() === unitId && countUnitRows(unitId) > 0) {
+            return "ready";
+          }
+          if (attempt === 0) {
+            console.log("[PESUClaw] Waiting for PESU to update course content...");
+          }
+          await sleep(100);
+        }
+        return "timeout";
+      }
+
+      function collectClasses(unitId) {
+        var classes = [];
+        var seenClassIds = new Set();
+        var subjectid = null;
+        $('#CourseContentId [onclick*="handleclasscoursecontentunit"]').each(
+          function () {
+            var m = ($(this).attr("onclick") || "").match(UNIT_ROW_RE);
+            if (!m) return;
+            var classId = m[1];
+            var currentSubjectId = m[2];
+            var currentUnitId = m[3];
+            // Ignore content from every other unit.
+            if (currentUnitId !== unitId) return;
+            if (!subjectid) subjectid = currentSubjectId;
+            // Same UUID occurs several times (one link per resource type).
+            if (seenClassIds.has(classId)) return;
+            seenClassIds.add(classId);
+            var $row = $(this).closest("tr");
+            var name = $row.length
+              ? $row.find("td").first().text().replace(/\s+/g, " ").trim()
+              : $(this).text().replace(/\s+/g, " ").trim();
+            if (!name) name = "Course Content " + (classes.length + 1);
+            classes.push({
+              id: classId,
+              name: name,
+              subjectId: currentSubjectId,
+              unitId: currentUnitId,
+            });
+          },
+        );
+        return { subjectid: subjectid, classes: classes };
+      }
+
+      // ─── Render items for the selected types ───
+      function renderItems(unitKey, cachedUnit, fromCache) {
+        _lastRenderedTab = unitKey;
+        var unitLabel = unitLabels[unitKey] || unitKey;
         contentArea.empty();
         progressWrap.hide();
 
-        var items = itemsByType[selectedType] || [];
-        var totalCount = items.length;
-        var typeLabel = "";
-        for (var ri = 0; ri < RESOURCE_TYPES.length; ri++) {
-          if (RESOURCE_TYPES[ri].id === selectedType) {
-            typeLabel = RESOURCE_TYPES[ri].label;
-            break;
-          }
-        }
+        var types = getSelectedTypeObjs();
+        var totalCount = 0;
+        types.forEach(function (rt) {
+          totalCount += (cachedUnit[rt.id] || []).length;
+        });
+        var typeNames = types
+          .map(function (rt) {
+            return rt.label;
+          })
+          .join(" + ");
 
-        titleDiv.text(typeLabel + ": " + unitText + " (" + totalCount + ")");
+        titleDiv.text(typeNames + ": " + unitLabel + " (" + totalCount + ")");
         statusDiv.text(
           totalCount
             ? "Ready" + (fromCache ? " \u00b7 cached" : "")
-            : "No files found for " + typeLabel,
+            : "No files found for " + typeNames,
         );
-
-        if (!totalCount) return;
 
         console.log(
-          "[PESUClaw] " +
-            typeLabel +
-            " " +
-            unitText +
-            " \u2014 " +
-            totalCount +
-            " files" +
-            (fromCache ? " (cached)" : ""),
+          "[PESUClaw] " + typeNames + " " + unitLabel + " \u2014 " + totalCount +
+            " files" + (fromCache ? " (cached)" : ""),
         );
 
-        // Merge & Download button
-        var dlAllBtn = $(
-          '<button class="pesu-dl-merge-btn">Merge & Download ' +
-            typeLabel +
-            "</button>",
-        );
-        dlAllBtn.on("click", function () {
-          mergeAndDownload(unitText, items, typeLabel, dlAllBtn);
+        // Bulk actions
+        var bulkRow = $('<div class="pesu-dl-bulk-row"></div>').css({
+          margin: "6px 0 10px",
         });
-        contentArea.append(dlAllBtn);
+        if (types.length > 1 && totalCount > 0) {
+          var multiBtn = $('<button class="pesu-dl-merge-btn pesu-dl-bulk-btn"></button>')
+            .text("Download selected types (one ZIP)")
+            .css({ marginBottom: "6px" });
+          multiBtn.on("click", function () {
+            runBulk("current", types, multiBtn);
+          });
+          bulkRow.append(multiBtn);
+        }
+        var allBtn = $('<button class="pesu-dl-merge-btn pesu-dl-bulk-btn"></button>')
+          .text("Download all units (one ZIP)")
+          .attr("title", "Visits every unit tab, then bundles the selected types per unit");
+        allBtn.on("click", function () {
+          runBulk("all", types, allBtn);
+        });
+        bulkRow.append(allBtn);
+        contentArea.append(bulkRow);
 
-        // Render items
-        items.forEach(function (t, idx) {
-          var displayTitle = t.title;
-          // If title matches another item's title, append class name for clarity
-          var dupeCount = items.filter(function (x) {
-            return x.title === t.title;
-          }).length;
-          if (dupeCount > 1 && t.className && t.className !== t.title) {
-            displayTitle = t.title + " [" + t.className + "]";
+        // One section per selected type
+        types.forEach(function (rt) {
+          var items = cachedUnit[rt.id] || [];
+          var section = $('<div class="pesu-dl-section"></div>').css({
+            marginTop: "10px",
+          });
+          var head = $('<div class="pesu-dl-section-head"></div>').css({
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            fontWeight: "600",
+            margin: "4px 0",
+          });
+          head.append($("<span></span>").text(rt.label + " (" + items.length + ")"));
+          section.append(head);
+
+          if (!items.length) {
+            section.append(
+              $("<div></div>")
+                .css({ fontSize: "12px", opacity: 0.7 })
+                .text("No files found for " + rt.label),
+            );
+            contentArea.append(section);
+            return;
           }
-          var btn = $(
-            '<button class="pesu-dl-item" id="pesu-dl-item-' +
-              idx +
-              '"></button>',
-          ).text(idx + 1 + ". " + displayTitle);
 
-          btn.on("click", function () {
-            var itemButton = $(this);
-            itemButton.prop("disabled", true).text(t.title + " \u2014 fetching");
-            downloadIndividualItem(t, idx)
-              .then(function () {
-                itemButton
-                  .prop("disabled", false)
-                  .addClass("done")
-                  .text(t.title + " \u2014 done");
-              })
-              .catch(function (error) {
-                console.error("[PESUClaw] Individual download failed:", error);
-                itemButton
-                  .prop("disabled", false)
-                  .addClass("failed")
-                  .text(t.title + " \u2014 failed");
-              });
+          var checkboxes = [];
+          var mergeBtn = $('<button class="pesu-dl-merge-btn"></button>');
+
+          function updateMergeLabel() {
+            var n = items.filter(isItemSelected).length;
+            mergeBtn
+              .text(
+                "Merge & Download " + rt.label +
+                  (n === items.length ? "" : " (" + n + "/" + items.length + ")"),
+              )
+              .prop("disabled", n === 0);
+          }
+
+          function setAll(value) {
+            items.forEach(function (t) {
+              t.selected = value;
+            });
+            checkboxes.forEach(function ($cb) {
+              $cb.prop("checked", value);
+            });
+            updateMergeLabel();
+          }
+
+          var linkCss = { cursor: "pointer", fontSize: "11px", fontWeight: "normal" };
+          head.append(
+            $("<span></span>")
+              .append(
+                $('<a href="javascript:void(0)">All</a>').css(linkCss).on("click", function () {
+                  setAll(true);
+                }),
+              )
+              .append(document.createTextNode(" / "))
+              .append(
+                $('<a href="javascript:void(0)">None</a>').css(linkCss).on("click", function () {
+                  setAll(false);
+                }),
+              ),
+          );
+
+          mergeBtn.on("click", function () {
+            mergeAndDownload(unitLabel, items.filter(isItemSelected), rt.label, mergeBtn);
+          });
+          section.append(mergeBtn);
+
+          items.forEach(function (t, idx) {
+            var displayTitle = t.title;
+            // If title matches another item's title, append class name for clarity
+            var dupeCount = items.filter(function (x) {
+              return x.title === t.title;
+            }).length;
+            if (dupeCount > 1 && t.className && t.className !== t.title) {
+              displayTitle = t.title + " [" + t.className + "]";
+            }
+            t._uid = "pesu-dl-item-" + rt.id + "-" + idx;
+
+            var row = $('<div class="pesu-dl-row"></div>').css({
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+            });
+            var cb = $('<input type="checkbox">')
+              .prop("checked", isItemSelected(t))
+              .attr("title", "Include in Merge & Download")
+              .css({ flex: "0 0 auto", margin: 0 });
+            cb.on("change", function () {
+              t.selected = this.checked;
+              updateMergeLabel();
+            });
+            checkboxes.push(cb);
+
+            var btn = $('<button class="pesu-dl-item" id="' + t._uid + '"></button>')
+              .css({ flex: "1 1 auto", minWidth: 0 })
+              .text(idx + 1 + ". " + displayTitle);
+
+            btn.on("click", function () {
+              var itemButton = $(this);
+              itemButton.prop("disabled", true).text(t.title + " \u2014 fetching");
+              downloadIndividualItem(t, idx)
+                .then(function () {
+                  itemButton
+                    .prop("disabled", false)
+                    .addClass("done")
+                    .text(t.title + " \u2014 done");
+                })
+                .catch(function (error) {
+                  console.error("[PESUClaw] Individual download failed:", error);
+                  itemButton
+                    .prop("disabled", false)
+                    .addClass("failed")
+                    .text(t.title + " \u2014 failed");
+                });
+            });
+
+            row.append(cb).append(btn);
+            section.append(row);
           });
 
-          contentArea.append(btn);
+          updateMergeLabel();
+          contentArea.append(section);
         });
       }
 
@@ -703,125 +955,137 @@
           : "";
       }
 
-      function createOfficeMergeScript(fileNames, outputName) {
-        return [
-          "#!/usr/bin/env python3",
-          '"""Convert the bundled Office files to PDF and merge them in bundle order.',
-          "",
-          "Uses LibreOffice when available. On Windows, Microsoft Word/PowerPoint",
-          "can be used instead (requires desktop Microsoft Office and pywin32).",
-          "If packages are missing, run the included launcher or:",
-          'python -m pip install -r requirements.txt',
-          '"""',
-          "from pathlib import Path",
-          "import platform",
-          "import shutil",
-          "import subprocess",
-          "import sys",
-          "import tempfile",
-          "",
-          "try:",
-          "    from pypdf import PdfMerger",
-          "except ImportError:",
-          "    try:",
-          "        from PyPDF2 import PdfMerger",
-          "    except ImportError:",
-          "        try:",
-          "            from PyPDF2 import PdfFileMerger as PdfMerger",
-          "        except ImportError:",
-          "            sys.exit('Missing PDF package. Run \"python -m pip install pypdf\" (or \"python -m pip install PyPDF2\").')",
-          "",
-          "FILES = " + JSON.stringify(fileNames, null, 4) + "",
-          "OUTPUT = Path(" + JSON.stringify(outputName) + ")",
-          "",
-          "def convert_with_libreoffice(source, output_dir, soffice):",
-          "    subprocess.run(",
-          "        [soffice, '--headless', '--convert-to', 'pdf', '--outdir', str(output_dir), str(source)],",
-          "        check=True,",
-          "        stdout=subprocess.PIPE,",
-          "        stderr=subprocess.PIPE,",
-          "        text=True,",
-          "    )",
-          "    return output_dir / (source.stem + '.pdf')",
-          "",
-          "def convert_with_microsoft_office(source, output_dir):",
-          "    try:",
-          "        import win32com.client",
-          "    except ImportError:",
-          "        sys.exit('Microsoft Office fallback needs pywin32. Run \"python -m pip install pywin32\", then retry.')",
-          "",
-          "    output = output_dir / (source.stem + '.pdf')",
-          "    extension = source.suffix.lower()",
-          "    if extension in ('.doc', '.docx'):",
-          "        word = win32com.client.DispatchEx('Word.Application')",
-          "        document = None",
-          "        try:",
-          "            word.Visible = False",
-          "            document = word.Documents.Open(str(source), ReadOnly=True, AddToRecentFiles=False)",
-          "            document.ExportAsFixedFormat(str(output), 17)",
-          "        finally:",
-          "            if document is not None:",
-          "                document.Close(False)",
-          "            word.Quit()",
-          "    elif extension in ('.ppt', '.pptx'):",
-          "        powerpoint = win32com.client.DispatchEx('PowerPoint.Application')",
-          "        presentation = None",
-          "        try:",
-          "            presentation = powerpoint.Presentations.Open(str(source), WithWindow=False, ReadOnly=True)",
-          "            presentation.SaveAs(str(output), 32)",
-          "        finally:",
-          "            if presentation is not None:",
-          "                presentation.Close()",
-          "            powerpoint.Quit()",
-          "    else:",
-          "        sys.exit(f'Unsupported Office file: {source.name}')",
-          "    return output",
-          "",
-          "def main():",
-          "    soffice = shutil.which('soffice') or shutil.which('libreoffice')",
-          "    use_microsoft_office = not soffice and platform.system() == 'Windows'",
-          "    if not soffice and not use_microsoft_office:",
-          "        sys.exit('No converter found. Install LibreOffice, or run this on Windows with desktop Microsoft Office and pywin32.')",
-          "",
-          "    bundle_dir = Path(__file__).resolve().parent",
-          "    with tempfile.TemporaryDirectory(prefix='pesuclaw-') as temp_dir:",
-          "        converted_dir = Path(temp_dir)",
-          "        converted = []",
-          "        for index, file_name in enumerate(FILES, start=1):",
-          "            source = bundle_dir / file_name",
-          "            if not source.is_file():",
-          "                sys.exit(f'Missing bundled file: {file_name}')",
-          "            file_temp_dir = converted_dir / str(index)",
-          "            file_temp_dir.mkdir()",
-          "            if soffice:",
-          "                pdf_path = convert_with_libreoffice(source, file_temp_dir, soffice)",
-          "            else:",
-          "                pdf_path = convert_with_microsoft_office(source, file_temp_dir)",
-          "            if not pdf_path.is_file():",
-          "                sys.exit(f'Office converter did not create a PDF for: {file_name}')",
-          "            converted.append(pdf_path)",
-          "",
-          "        merger = PdfMerger()",
-          "        try:",
-          "            for pdf_path in converted:",
-          "                merger.append(str(pdf_path))",
-          "            merger.write(bundle_dir / OUTPUT)",
-          "        finally:",
-          "            merger.close()",
-          "    print(f'Created {OUTPUT} from {len(FILES)} Office files.')",
-          "",
-          "if __name__ == '__main__':",
-          "    main()",
-          "",
-        ].join("\n");
+      // groups: [{ output: "path/inside/bundle.pdf", files: ["relative/path.docx", ...] }]
+      function createOfficeMergeScript(groups) {
+        var template = String.raw`#!/usr/bin/env python3
+"""Convert the bundled Office files to PDF and merge them (with bookmarks).
+
+Uses LibreOffice when available. On Windows, Microsoft Word/PowerPoint can be
+used instead (requires desktop Microsoft Office and pywin32).
+Run the included launcher, or:  python -m pip install -r requirements.txt
+"""
+from pathlib import Path
+import platform
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+try:
+    from pypdf import PdfWriter
+except ImportError:
+    sys.exit('Missing PDF package. Run "python -m pip install pypdf".')
+
+# Each group becomes one merged PDF (paths are relative to this script).
+GROUPS = __GROUPS__
+
+
+def convert_with_libreoffice(source, output_dir, soffice):
+    subprocess.run(
+        [soffice, '--headless', '--convert-to', 'pdf', '--outdir', str(output_dir), str(source)],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    return output_dir / (source.stem + '.pdf')
+
+
+def convert_with_microsoft_office(source, output_dir):
+    try:
+        import win32com.client
+    except ImportError:
+        sys.exit('Microsoft Office fallback needs pywin32. Run "python -m pip install pywin32", then retry.')
+
+    output = output_dir / (source.stem + '.pdf')
+    extension = source.suffix.lower()
+    if extension in ('.doc', '.docx'):
+        word = win32com.client.DispatchEx('Word.Application')
+        document = None
+        try:
+            word.Visible = False
+            document = word.Documents.Open(str(source), ReadOnly=True, AddToRecentFiles=False)
+            document.ExportAsFixedFormat(str(output), 17)
+        finally:
+            if document is not None:
+                document.Close(False)
+            word.Quit()
+    elif extension in ('.ppt', '.pptx'):
+        powerpoint = win32com.client.DispatchEx('PowerPoint.Application')
+        presentation = None
+        try:
+            presentation = powerpoint.Presentations.Open(str(source), WithWindow=False, ReadOnly=True)
+            presentation.SaveAs(str(output), 32)
+        finally:
+            if presentation is not None:
+                presentation.Close()
+            powerpoint.Quit()
+    else:
+        sys.exit(f'Unsupported Office file: {source.name}')
+    return output
+
+
+def bookmark_title(file_name):
+    stem = Path(file_name).stem
+    return re.sub(r'^\d+_', '', stem) or stem
+
+
+def main():
+    soffice = shutil.which('soffice') or shutil.which('libreoffice')
+    use_microsoft_office = not soffice and platform.system() == 'Windows'
+    if not soffice and not use_microsoft_office:
+        sys.exit('No converter found. Install LibreOffice, or run this on Windows with desktop Microsoft Office and pywin32.')
+
+    bundle_dir = Path(__file__).resolve().parent
+    total_files = 0
+    with tempfile.TemporaryDirectory(prefix='pesuclaw-') as temp_dir:
+        temp_root = Path(temp_dir)
+        for group_number, group in enumerate(GROUPS, start=1):
+            converted = []
+            for index, file_name in enumerate(group['files'], start=1):
+                source = bundle_dir / file_name
+                if not source.is_file():
+                    sys.exit(f'Missing bundled file: {file_name}')
+                file_temp_dir = temp_root / f'{group_number}_{index}'
+                file_temp_dir.mkdir()
+                print(f'Converting {file_name} ...')
+                if soffice:
+                    pdf_path = convert_with_libreoffice(source, file_temp_dir, soffice)
+                else:
+                    pdf_path = convert_with_microsoft_office(source, file_temp_dir)
+                if not pdf_path.is_file():
+                    sys.exit(f'Office converter did not create a PDF for: {file_name}')
+                converted.append((file_name, pdf_path))
+
+            writer = PdfWriter()
+            try:
+                for file_name, pdf_path in converted:
+                    writer.append(str(pdf_path), outline_item=bookmark_title(file_name))
+                output_path = bundle_dir / group['output']
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(output_path, 'wb') as handle:
+                    writer.write(handle)
+            finally:
+                writer.close()
+            print(f"Created {group['output']} from {len(converted)} file(s).")
+            total_files += len(converted)
+
+    print(f'Done: {total_files} Office file(s) merged into {len(GROUPS)} PDF(s).')
+
+
+if __name__ == '__main__':
+    main()
+`;
+        return template.replace("__GROUPS__", function () {
+          return JSON.stringify(groups, null, 4);
+        });
       }
 
       function createOfficeRequirements() {
-        return [
-          "pypdf",
-          "pywin32; platform_system == 'Windows'",
-          "",
-        ].join("\n");
+        return ["pypdf>=4.0", "pywin32; platform_system == 'Windows'", ""].join(
+          "\n",
+        );
       }
 
       function createWindowsMergeLauncher() {
@@ -851,42 +1115,94 @@
         ].join("\n");
       }
 
-      async function mergeAndDownload(unitText, items, typeName, btn) {
-        if (!items.length) {
-          statusDiv.text("Nothing to download");
-          return;
-        }
-        btn.text("Downloading...").prop("disabled", true);
-        progressWrap.show();
+      // ─── PDF bookmarks (one outline entry per merged source file) ───
+      function addPdfOutline(mergedPdf, entries) {
+        var P = PDFLib;
+        var valid = entries.filter(function (e) {
+          return e && typeof e.pageIndex === "number";
+        });
+        if (!valid.length) return;
+        var ctx = mergedPdf.context;
+        var pages = mergedPdf.getPages();
+        var outlinesRef = ctx.nextRef();
+        var refs = valid.map(function () {
+          return ctx.nextRef();
+        });
+        valid.forEach(function (e, i) {
+          var page = pages[Math.min(e.pageIndex, pages.length - 1)];
+          var dict = ctx.obj({
+            Title: P.PDFHexString.fromText(String(e.title || "Untitled").slice(0, 200)),
+            Parent: outlinesRef,
+            Dest: [page.ref, P.PDFName.of("Fit")],
+          });
+          if (i > 0) dict.set(P.PDFName.of("Prev"), refs[i - 1]);
+          if (i < valid.length - 1) dict.set(P.PDFName.of("Next"), refs[i + 1]);
+          ctx.assign(refs[i], dict);
+        });
+        ctx.assign(
+          outlinesRef,
+          ctx.obj({
+            Type: "Outlines",
+            First: refs[0],
+            Last: refs[refs.length - 1],
+            Count: valid.length,
+          }),
+        );
+        mergedPdf.catalog.set(P.PDFName.of("Outlines"), outlinesRef);
+        mergedPdf.catalog.set(P.PDFName.of("PageMode"), P.PDFName.of("UseOutlines"));
+      }
 
+      // Fetches every item, merges the PDFs (with bookmarks) and collects the
+      // non-PDF files. Pure data in / data out so it serves both the single
+      // "Merge & Download" button and the bulk ZIP downloads.
+      // opts: { shouldCancel(): bool, onProgress(i, total, item) }
+      async function processItems(items, typeName, opts) {
+        opts = opts || {};
         var PDFDocument = PDFLib.PDFDocument;
-        var safeName =
-          unitText.replace(/[^a-zA-Z0-9 _-]/g, "").trim() || "files";
         var mergedPdf = await PDFDocument.create();
-        var pdfCount = 0,
-          failed = 0;
-        var pptxFiles = [];
-        var officeFiles = [];
-        var archiveCount = 0;
+        var res = {
+          mergedPdf: mergedPdf,
+          pdfCount: 0,
+          failed: 0,
+          cancelled: false,
+          otherFiles: [],
+          officeFiles: [],
+          archiveCount: 0,
+          outline: [],
+        };
         var usedNames = new Set();
+        var titleCounts = {};
+        items.forEach(function (it) {
+          titleCounts[it.title] = (titleCounts[it.title] || 0) + 1;
+        });
+
+        function addOtherFile(item, index, ext, arrayBuf) {
+          var safeTitle = item.title.replace(/[/\\:*?"<>|]/g, "_").trim() || "file";
+          if (safeTitle.toLowerCase().endsWith(ext)) {
+            safeTitle = safeTitle.slice(0, -ext.length).trim() || "file";
+          }
+          var finalName = index + 1 + "_" + safeTitle + ext;
+          var counter = 1;
+          while (usedNames.has(finalName.toLowerCase())) {
+            finalName = index + 1 + "_" + safeTitle + " (" + counter + ")" + ext;
+            counter++;
+          }
+          usedNames.add(finalName.toLowerCase());
+          res.otherFiles.push({ name: finalName, data: arrayBuf });
+          if (getOfficeExtension(finalName)) res.officeFiles.push(finalName);
+          return finalName;
+        }
 
         for (var i = 0; i < items.length; i++) {
+          if (opts.shouldCancel && opts.shouldCancel()) {
+            res.cancelled = true;
+            break;
+          }
           var item = items[i];
           var url = item.isSlideUrl
             ? item.id
             : "/Academy/s/referenceMeterials/downloadcoursedoc/" + item.id;
-          var pct = Math.round(((i + 1) / items.length) * 100);
-          statusDiv.text(
-            "Fetching " +
-              typeName +
-              " " +
-              (i + 1) +
-              "/" +
-              items.length +
-              ": " +
-              item.title,
-          );
-          progressBar.css("width", pct + "%");
+          if (opts.onProgress) opts.onProgress(i, items.length, item);
 
           try {
             var resp = await fetch(url, { credentials: "same-origin" });
@@ -894,10 +1210,7 @@
             var arrayBuf = await resp.arrayBuffer();
             var hdr = new Uint8Array(arrayBuf.slice(0, 512));
             var isPdf =
-              hdr[0] === 0x25 &&
-              hdr[1] === 0x50 &&
-              hdr[2] === 0x44 &&
-              hdr[3] === 0x46;
+              hdr[0] === 0x25 && hdr[1] === 0x50 && hdr[2] === 0x44 && hdr[3] === 0x46;
             var responseFilename = getResponseFilename(resp);
             var officeExtension = await getOfficeExtensionFromFile(
               arrayBuf,
@@ -906,15 +1219,10 @@
               resp.headers.get("Content-Type"),
             );
             var preservedExt =
-              officeExtension ||
-              getPreservedExtension(responseFilename, item.title);
+              officeExtension || getPreservedExtension(responseFilename, item.title);
             var archiveExt = preservedExt
               ? ""
-              : getArchiveExtension(
-                  hdr,
-                  responseFilename,
-                  item.title,
-                );
+              : getArchiveExtension(hdr, responseFilename, item.title);
 
             if (archiveExt === ".zip" && !isPdf) {
               console.warn(
@@ -929,235 +1237,602 @@
 
             if (isPdf) {
               try {
-                var srcPdf = await PDFDocument.load(arrayBuf, {
-                  ignoreEncryption: true,
-                });
-                var pages = await mergedPdf.copyPages(
-                  srcPdf,
-                  srcPdf.getPageIndices(),
-                );
+                var srcPdf = await PDFDocument.load(arrayBuf, { ignoreEncryption: true });
+                var startPage = mergedPdf.getPageCount();
+                var pages = await mergedPdf.copyPages(srcPdf, srcPdf.getPageIndices());
                 pages.forEach(function (p) {
                   mergedPdf.addPage(p);
                 });
-                pdfCount++;
-                $("#pesu-dl-item-" + i)
-                  .removeClass()
-                  .addClass("pesu-dl-item merged")
-                  .text(
-                    item.title +
-                      " \u2014 " +
-                      srcPdf.getPageCount() +
-                      "pg merged",
-                  );
-              } catch (e) {
-                failed++;
-                $("#pesu-dl-item-" + i)
-                  .removeClass()
-                  .addClass("pesu-dl-item failed")
-                  .text(item.title + " \u2014 error");
-              }
-            } else if (archiveExt) {
-              if (isArchiveExtension(archiveExt)) archiveCount++;
-              // Build name: (number)_title.ext
-              var safeTitle = item.title.replace(/[/\\:*?"<>|]/g, "_").trim();
-              var zipEntryName = i + 1 + "_" + safeTitle + archiveExt;
-              var finalName = zipEntryName,
-                counter = 1;
-              while (usedNames.has(finalName.toLowerCase())) {
-                finalName =
-                  i + 1 + "_" + safeTitle + " (" + counter + ")" + archiveExt;
-                counter++;
-              }
-              usedNames.add(finalName.toLowerCase());
-              pptxFiles.push({ name: finalName, data: arrayBuf });
-              if (getOfficeExtension(finalName)) {
-                officeFiles.push(finalName);
-              }
-              $("#pesu-dl-item-" + i)
-                .removeClass()
-                .addClass("pesu-dl-item zipped")
-                .text(item.title + " \u2014 zipped");
-            } else {
-              // Not PDF or archive — detect type from magic bytes / headers and add to ZIP bundle
-              var otherExt = preservedExt;
-              if (!otherExt) {
-                // Guess extension from magic bytes
-                var isDOC =
-                  hdr[0] === 0xd0 &&
-                  hdr[1] === 0xcf &&
-                  hdr[2] === 0x11 &&
-                  hdr[3] === 0xe0;
-                otherExt = isDOC ? ".doc" : ".bin";
-              }
-              var safeOtherTitle = item.title
-                .replace(/[/\\:*?"<>|]/g, "_")
-                .trim();
-              if (safeOtherTitle.toLowerCase().endsWith(otherExt)) {
-                safeOtherTitle =
-                  safeOtherTitle.slice(0, -otherExt.length).trim() || "file";
-              }
-              var otherEntryName = i + 1 + "_" + safeOtherTitle + otherExt;
-              var otherFinal = otherEntryName,
-                otherCounter = 1;
-              while (usedNames.has(otherFinal.toLowerCase())) {
-                otherFinal =
-                  i +
-                  1 +
-                  "_" +
-                  safeOtherTitle +
-                  " (" +
-                  otherCounter +
-                  ")" +
-                  otherExt;
-                otherCounter++;
-              }
-              usedNames.add(otherFinal.toLowerCase());
-              pptxFiles.push({ name: otherFinal, data: arrayBuf });
-              if (getOfficeExtension(otherFinal)) {
-                officeFiles.push(otherFinal);
-              }
-              $("#pesu-dl-item-" + i)
-                .removeClass()
-                .addClass("pesu-dl-item zipped")
-                .text(
-                  item.title +
-                    " \u2014 zipped (" +
-                    otherFinal.split(".").pop() +
-                    ")",
+                res.outline.push({
+                  title:
+                    titleCounts[item.title] > 1 &&
+                    item.className &&
+                    item.className !== item.title
+                      ? item.title + " [" + item.className + "]"
+                      : item.title,
+                  pageIndex: startPage,
+                });
+                res.pdfCount++;
+                setItemState(
+                  item,
+                  "merged",
+                  item.title + " \u2014 " + srcPdf.getPageCount() + "pg merged",
                 );
+              } catch (e) {
+                res.failed++;
+                setItemState(item, "failed", item.title + " \u2014 error");
+              }
+            } else {
+              var ext = preservedExt || archiveExt;
+              if (!ext) {
+                var isOLE =
+                  hdr[0] === 0xd0 && hdr[1] === 0xcf && hdr[2] === 0x11 && hdr[3] === 0xe0;
+                ext = isOLE ? ".doc" : ".bin";
+              }
+              if (isArchiveExtension(ext)) res.archiveCount++;
+              var finalName = addOtherFile(item, i, ext, arrayBuf);
+              setItemState(
+                item,
+                "zipped",
+                item.title + " \u2014 zipped (" + finalName.split(".").pop() + ")",
+              );
             }
           } catch (err) {
-            failed++;
-            $("#pesu-dl-item-" + i)
-              .removeClass()
-              .addClass("pesu-dl-item failed")
-              .text(item.title + " \u2014 failed");
+            res.failed++;
+            setItemState(item, "failed", item.title + " \u2014 failed");
           }
 
-          if (i < items.length - 1)
-            await new Promise(function (r) {
-              setTimeout(r, 200);
+          if (i < items.length - 1) await sleep(200);
+        }
+
+        if (res.pdfCount >= 2) addPdfOutline(mergedPdf, res.outline);
+        return res;
+      }
+
+      // Adds a processed result to a JSZip. `folder` is "" or "A/B/".
+      async function packResult(zip, folder, baseName, typeLabel, res, groups, totals) {
+        if (res.pdfCount > 0) {
+          var bytes = await res.mergedPdf.save();
+          zip.file(folder + baseName + "_" + typeLabel + "_Merged.pdf", bytes);
+          totals.pdfs += res.pdfCount;
+          totals.pages += res.mergedPdf.getPageCount();
+        }
+        if (res.otherFiles.length > 0) {
+          var filesFolder = folder + "files/";
+          res.otherFiles.forEach(function (f) {
+            zip.file(filesFolder + f.name, f.data);
+          });
+          totals.others += res.otherFiles.length;
+          if (res.officeFiles.length > 0) {
+            groups.push({
+              output: folder + baseName + "_" + typeLabel + "_Office_Merged.pdf",
+              files: res.officeFiles.map(function (n) {
+                return filesFolder + n;
+              }),
             });
-        }
-
-        var statusParts = [];
-
-        if (pdfCount > 0) {
-          statusDiv.text(
-            "Saving " +
-              typeName +
-              " merged PDF (" +
-              mergedPdf.getPageCount() +
-              " pages)...",
-          );
-          var pdfBytes = await mergedPdf.save();
-          var pdfBlob = new Blob([pdfBytes], { type: "application/pdf" });
-          triggerDownload(pdfBlob, safeName + "_" + typeName + "_Merged.pdf");
-          var sz = formatSize(pdfBlob.size);
-          statusParts.push(
-            pdfCount +
-              " PDFs merged \u00b7 " +
-              mergedPdf.getPageCount() +
-              " pages \u00b7 " +
-              sz,
-          );
-        }
-
-        if (pptxFiles.length > 0) {
-          statusDiv.text("Creating " + typeName + " ZIP...");
-          await new Promise(function (r) {
-            setTimeout(r, 500);
-          });
-          var zip = new JSZip();
-          pptxFiles.forEach(function (f) {
-            zip.file(f.name, f.data);
-          });
-          if (officeFiles.length > 0) {
-            var scriptName = "merge_office_files.py";
-            var outputName = safeName + "_" + typeName + "_Office_Merged.pdf";
-            zip.file(
-              scriptName,
-              createOfficeMergeScript(officeFiles, outputName),
-            );
-            zip.file("requirements.txt", createOfficeRequirements());
-            zip.file("run_merge_windows.bat", createWindowsMergeLauncher());
-            zip.file("run_merge_linux.sh", createUnixMergeLauncher());
           }
-          var zipBlob = await zip.generateAsync({ type: "blob" });
-          triggerDownload(zipBlob, safeName + "_" + typeName + "_files.zip");
-          var sz2 = formatSize(zipBlob.size);
-          statusParts.push(
-            pptxFiles.length +
-              " files zipped" +
-              (officeFiles.length
-                ? " \u00b7 merge_office_files.py included"
-                : "") +
-              " \u00b7 " +
-              sz2,
-          );
         }
+        totals.failed += res.failed;
+      }
 
-        if (pdfCount > 0 || pptxFiles.length > 0) {
-          statusParts.unshift(
-            items.length -
-              failed +
-              " processed \u00b7 " +
-              pdfCount +
-              " PDFs merged \u00b7 " +
-              (pptxFiles.length - archiveCount) +
-              " Office/other files \u00b7 " +
-              archiveCount +
-              " archives",
-          );
+      function addMergeHelpers(zip, groups) {
+        if (!groups.length) return;
+        zip.file("merge_office_files.py", createOfficeMergeScript(groups));
+        zip.file("requirements.txt", createOfficeRequirements());
+        zip.file("run_merge_windows.bat", createWindowsMergeLauncher());
+        zip.file("run_merge_linux.sh", createUnixMergeLauncher());
+      }
+
+      // ─── Single type: merged PDF + ZIP of the other files ───
+      async function mergeAndDownload(unitText, items, typeName, btn) {
+        if (!items.length) {
+          statusDiv.text("Nothing selected to download");
+          return;
         }
+        btn.text("Downloading...").prop("disabled", true);
+        progressWrap.show();
 
-        if (pdfCount === 0 && pptxFiles.length === 0) {
-          btn.text("No files downloaded").css("background", "#c62828");
-          statusDiv.text(
-            "Could not process any files." +
-              (failed ? " " + failed + " failed." : ""),
-          );
-        } else {
-          btn.text("Done").css("background", "#2e7d32");
-          statusDiv.html(
-            statusParts.join("<br>") +
-              (failed ? "<br>" + failed + " failed" : ""),
-          );
+        var safeName = safeFileName(unitText, "files");
+        var statusParts = [];
+        try {
+          var res = await processItems(items, typeName, {
+            onProgress: function (i, n, item) {
+              statusDiv.text(
+                "Fetching " + typeName + " " + (i + 1) + "/" + n + ": " + item.title,
+              );
+              progressBar.css("width", Math.round(((i + 1) / n) * 100) + "%");
+            },
+          });
+
+          if (res.pdfCount > 0) {
+            statusDiv.text(
+              "Saving " + typeName + " merged PDF (" + res.mergedPdf.getPageCount() + " pages)...",
+            );
+            var pdfBytes = await res.mergedPdf.save();
+            var pdfBlob = new Blob([pdfBytes], { type: "application/pdf" });
+            triggerDownload(pdfBlob, safeName + "_" + typeName + "_Merged.pdf");
+            statusParts.push(
+              res.pdfCount + " PDFs merged \u00b7 " + res.mergedPdf.getPageCount() +
+                " pages \u00b7 " + formatSize(pdfBlob.size),
+            );
+          }
+
+          if (res.otherFiles.length > 0) {
+            statusDiv.text("Creating " + typeName + " ZIP...");
+            await sleep(500);
+            var zip = new JSZip();
+            res.otherFiles.forEach(function (f) {
+              zip.file(f.name, f.data);
+            });
+            addMergeHelpers(
+              zip,
+              res.officeFiles.length
+                ? [
+                    {
+                      output: safeName + "_" + typeName + "_Office_Merged.pdf",
+                      files: res.officeFiles,
+                    },
+                  ]
+                : [],
+            );
+            var zipBlob = await zip.generateAsync({ type: "blob" });
+            triggerDownload(zipBlob, safeName + "_" + typeName + "_files.zip");
+            statusParts.push(
+              res.otherFiles.length + " files zipped" +
+                (res.officeFiles.length ? " \u00b7 merge_office_files.py included" : "") +
+                " \u00b7 " + formatSize(zipBlob.size),
+            );
+          }
+
+          if (res.pdfCount > 0 || res.otherFiles.length > 0) {
+            statusParts.unshift(
+              items.length - res.failed + " processed \u00b7 " + res.pdfCount +
+                " PDFs merged \u00b7 " + (res.otherFiles.length - res.archiveCount) +
+                " Office/other files \u00b7 " + res.archiveCount + " archives",
+            );
+          }
+
+          if (res.pdfCount === 0 && res.otherFiles.length === 0) {
+            btn.text("No files downloaded").css("background", "#c62828");
+            statusDiv.text(
+              "Could not process any files." + (res.failed ? " " + res.failed + " failed." : ""),
+            );
+          } else {
+            btn.text("Done").css("background", "#2e7d32");
+            statusDiv.html(
+              statusParts.join("<br>") + (res.failed ? "<br>" + res.failed + " failed" : ""),
+            );
+          }
+        } catch (err) {
+          console.error("[PESUClaw] Merge failed:", err);
+          btn.text("Failed \u2014 retry").prop("disabled", false).css("background", "#c62828");
+          statusDiv.text("Failed: " + (err && err.message ? err.message : err));
         }
         progressWrap.hide();
       }
 
+      // ─── Bulk: selected types of this unit, or every unit, in one ZIP ───
+      // mode: "current" | "all"
+      async function runBulk(mode, types, btn) {
+        if (_bulkRunning || !types.length) return;
+        _bulkRunning = true;
+        _bulkCancel = false;
+        _fetchVersion++; // cancel any in-flight scan
+        _fetching = false;
+
+        var $startAnchor = getActiveUnitAnchor();
+        var startUnitId = $startAnchor.length ? parseUnitId($startAnchor) : null;
+
+        var units = [];
+        if (mode === "all") {
+          getUnitAnchors().each(function () {
+            var id = parseUnitId($(this));
+            if (
+              id &&
+              !units.some(function (u) {
+                return u.id === id;
+              })
+            ) {
+              units.push({ id: id, el: this, label: getUnitLabel($(this)) });
+            }
+          });
+        } else if ($startAnchor.length && startUnitId) {
+          units.push({
+            id: startUnitId,
+            el: $startAnchor[0],
+            label: getUnitLabel($startAnchor),
+          });
+        }
+        if (!units.length) {
+          statusDiv.text("Could not find any units");
+          _bulkRunning = false;
+          return;
+        }
+
+        var multiUnit = units.length > 1;
+        var typesLabel = types
+          .map(function (rt) {
+            return rt.label;
+          })
+          .join("-");
+        var zip = new JSZip();
+        var groups = [];
+        var totals = { pdfs: 0, pages: 0, others: 0, failed: 0 };
+        var skippedUnits = [];
+        var summaryLines = [];
+
+        $(".pesu-dl-bulk-btn, .pesu-dl-merge-btn, .pesu-dl-item").prop("disabled", true);
+        refetchBtn.prop("disabled", true).css("opacity", 0.5);
+        btn.text("Working...");
+        cancelBtn.show();
+        progressWrap.show();
+        progressBar.css("width", "2%");
+
+        function cancelled() {
+          return _bulkCancel;
+        }
+        function overall(unitIndex, fraction) {
+          return Math.max(2, Math.round(((unitIndex + fraction) / units.length) * 100));
+        }
+
+        try {
+          for (var ui = 0; ui < units.length; ui++) {
+            if (_bulkCancel) break;
+            var u = units[ui];
+            var prefix = multiUnit ? "Unit " + (ui + 1) + "/" + units.length + " (" + u.label + "): " : "";
+
+            statusDiv.text(prefix + "opening...");
+            progressBar.css("width", overall(ui, 0) + "%");
+            if (getActiveUnitId() !== u.id) u.el.click();
+            var ready = await waitForUnitReady(u.id, cancelled, multiUnit ? 80 : 50);
+            if (ready === "cancelled") break;
+            if (ready !== "ready") {
+              skippedUnits.push(u.label);
+              continue;
+            }
+
+            var unitKey = getActiveUnitText();
+            unitLabels[unitKey] = u.label;
+            if (!cache[unitKey]) cache[unitKey] = {};
+            var cachedUnit = cache[unitKey];
+            var collected = collectClasses(u.id);
+
+            // Scan whatever hasn't been scanned yet for the chosen types
+            var missingTypes = types.filter(function (rt) {
+              return !cachedUnit.hasOwnProperty(rt.id);
+            });
+            if (missingTypes.length && collected.subjectid && collected.classes.length) {
+              var scanned = {};
+              missingTypes.forEach(function (rt) {
+                scanned[rt.id] = [];
+              });
+              var totalSteps = collected.classes.length * missingTypes.length;
+              var step = 0;
+              for (var ci = 0; ci < collected.classes.length && !_bulkCancel; ci++) {
+                for (var mi = 0; mi < missingTypes.length && !_bulkCancel; mi++) {
+                  var cls = collected.classes[ci];
+                  var mt = missingTypes[mi];
+                  step++;
+                  statusDiv.text(
+                    prefix + "scanning " + mt.label + " " + (ci + 1) + "/" +
+                      collected.classes.length + ": " + cls.name,
+                  );
+                  progressBar.css("width", overall(ui, (step / totalSteps) * 0.3) + "%");
+                  try {
+                    var found = await scanClassForType(collected.subjectid, cls, mt.id, mt.label);
+                    scanned[mt.id] = scanned[mt.id].concat(found);
+                  } catch (scanErr) {
+                    console.warn("[PESUClaw] warn: " + cls.name + " (" + mt.label + ")", scanErr);
+                  }
+                  await sleep(300);
+                }
+              }
+              if (_bulkCancel) break;
+              missingTypes.forEach(function (rt) {
+                cachedUnit[rt.id] = scanned[rt.id];
+              });
+            }
+
+            var unitSafe = safeFileName(u.label, "Unit" + (ui + 1));
+            for (var ti = 0; ti < types.length; ti++) {
+              if (_bulkCancel) break;
+              var rt = types[ti];
+              var chosen = (cachedUnit[rt.id] || []).filter(isItemSelected);
+              if (!chosen.length) continue;
+
+              var folder = multiUnit
+                ? unitSafe + "/" + rt.label + "/"
+                : types.length > 1
+                  ? rt.label + "/"
+                  : "";
+              var res = await processItems(chosen, rt.label, {
+                shouldCancel: cancelled,
+                onProgress: function (i, n, item) {
+                  statusDiv.text(
+                    prefix + "fetching " + rt.label + " " + (i + 1) + "/" + n + ": " + item.title,
+                  );
+                  progressBar.css(
+                    "width",
+                    overall(ui, 0.3 + 0.7 * ((ti + i / n) / types.length)) + "%",
+                  );
+                },
+              });
+              if (res.cancelled) break;
+              await packResult(zip, folder, unitSafe, rt.label, res, groups, totals);
+            }
+          }
+
+          if (_bulkCancel) {
+            summaryLines.push("Cancelled \u2014 nothing was downloaded.");
+          } else if (totals.pdfs + totals.others === 0) {
+            summaryLines.push("No files were found to download.");
+          } else {
+            statusDiv.text("Creating ZIP...");
+            addMergeHelpers(zip, groups);
+            var blob = await zip.generateAsync({ type: "blob" });
+            var zipName =
+              (multiUnit ? "PESU_AllUnits" : safeFileName(units[0].label, "files")) +
+              "_" + typesLabel + ".zip";
+            triggerDownload(blob, zipName);
+            summaryLines.push(
+              (multiUnit ? units.length - skippedUnits.length + " units \u00b7 " : "") +
+                totals.pdfs + " PDFs merged (" + totals.pages + " pages) \u00b7 " +
+                totals.others + " other files" +
+                (groups.length ? " \u00b7 merge_office_files.py included" : "") +
+                " \u00b7 " + formatSize(blob.size),
+            );
+          }
+          if (skippedUnits.length) {
+            summaryLines.push("No content found for: " + skippedUnits.join(", "));
+          }
+          if (totals.failed) summaryLines.push(totals.failed + " failed");
+        } catch (err) {
+          console.error("[PESUClaw] Bulk download failed:", err);
+          summaryLines.push("Failed: " + (err && err.message ? err.message : err));
+        } finally {
+          // Put the page back on the unit the user was looking at
+          if (
+            multiUnit &&
+            startUnitId &&
+            $startAnchor.length &&
+            getActiveUnitId() !== startUnitId
+          ) {
+            $startAnchor[0].click();
+            await waitForUnitReady(startUnitId, function () {
+              return false;
+            }, 50);
+          }
+          _bulkRunning = false;
+          _bulkCancel = false;
+          cancelBtn.hide();
+          progressWrap.hide();
+          refetchBtn.prop("disabled", false).css("opacity", 1);
+          _lastActiveTab = getActiveUnitText();
+          renderOrFetch();
+          statusDiv.empty();
+          summaryLines.forEach(function (line) {
+            statusDiv.append($("<div></div>").text(line));
+          });
+        }
+      }
+
       // ─── Fetch & render ───
+      // Scans one class row for downloadable resources of one type.
+      // Returns a de-duplicated array of items; throws if the request fails.
+      async function scanClassForType(subjectid, cls, typeId, typeLabel) {
+        var found = [];
+        var response = await $.get("/Academy/s/studentProfilePESUAdmin", {
+          url: "studentProfilePESUAdmin",
+          controllerMode: "6403",
+          actionType: "60",
+          selectedData: subjectid,
+          id: typeId,
+          unitid: cls.id,
+        });
+        if (typeof response === "string") {
+          var $html = $("<div>").html(response);
+          var itemsBefore = found.length;
+          // Pattern 1: onclick with downloadcoursedoc('id')
+          $html
+            .find('[onclick*="downloadcoursedoc"]')
+            .each(function () {
+              var onclick = $(this).attr("onclick") || "";
+              var m = onclick.match(/downloadcoursedoc\('([^']+)'\)/);
+              if (m) {
+                found.push({
+                  title: $(this).text().trim() || cls.name,
+                  id: m[1],
+                  className: cls.name,
+                  typeId: typeId,
+                });
+              }
+            });
+          // Pattern 2: onclick with downloadslidecoursedoc / loadIframe
+          $html
+            .find('[onclick*="downloadslidecoursedoc"]')
+            .each(function () {
+              var onclick = $(this).attr("onclick") || "";
+              var m = onclick.match(/loadIframe\('([^']+)'/);
+              if (m) {
+                var slideUrl = m[1].split("#")[0];
+                found.push({
+                  title: $(this).text().trim() || cls.name,
+                  id: slideUrl,
+                  className: cls.name,
+                  isSlideUrl: true,
+                  typeId: typeId,
+                });
+              }
+            });
+          // Pattern 3: <a> tags with href containing downloadcoursedoc
+          $html.find('a[href*="downloadcoursedoc"]').each(function () {
+            var href = $(this).attr("href") || "";
+            var m = href.match(/downloadcoursedoc\/([^/?#]+)/);
+            if (m) {
+              found.push({
+                title: $(this).text().trim() || cls.name,
+                id: m[1],
+                className: cls.name,
+                typeId: typeId,
+              });
+            }
+          });
+          // Pattern 4: any onclick with download-related function calls (broad catch)
+          $html.find("[onclick]").each(function () {
+            var onclick = $(this).attr("onclick") || "";
+            if (
+              onclick.includes("downloadcoursedoc") ||
+              onclick.includes("downloadslidecoursedoc")
+            )
+              return;
+            var patterns = [
+              /download[A-Za-z]*\('([^']+)'\)/,
+              /downloadDoc\('([^']+)'\)/,
+              /downloadFile\('([^']+)'\)/,
+            ];
+            for (var pi = 0; pi < patterns.length; pi++) {
+              var m = onclick.match(patterns[pi]);
+              if (m) {
+                found.push({
+                  title: $(this).text().trim() || cls.name,
+                  id: m[1],
+                  className: cls.name,
+                  typeId: typeId,
+                });
+                break;
+              }
+            }
+          });
+          // Pattern 5: <a> tags with href containing referenceMeterials (PESU's spelling)
+          $html.find('a[href*="referenceMeterials"]').each(function () {
+            var href = $(this).attr("href") || "";
+            var m = href.match(/referenceMeterials\/[^/]+\/([^/?#]+)/);
+            if (m) {
+              found.push({
+                title: $(this).text().trim() || cls.name,
+                id: m[1],
+                className: cls.name,
+                typeId: typeId,
+              });
+            }
+          });
+          // Pattern 6: video <source> tags (for QA/QB video content)
+          $html.find("source[src], video[src]").each(function () {
+            var src = $(this).attr("src") || "";
+            if (src) {
+              found.push({
+                title: cls.name,
+                id: src,
+                className: cls.name,
+                isSlideUrl: true,
+                typeId: typeId,
+              });
+            }
+          });
+          // Pattern 7: video URLs in JavaScript (e.g. var videoSrc = '...')
+          var videoMatches = response.match(
+            /(?:src|videoSrc|videoUrl|source)\s*[:=]\s*['"]([^'"]+\.(?:mp4|webm|ogg|m3u8)[^'"]*)['"]/gi,
+          );
+          if (videoMatches) {
+            videoMatches.forEach(function (vm) {
+              var m2 = vm.match(/['"]([^'"]+)['"]\s*$/);
+              if (m2) {
+                found.push({
+                  title: cls.name,
+                  id: m2[1],
+                  className: cls.name,
+                  isSlideUrl: true,
+                  typeId: typeId,
+                });
+              }
+            });
+          }
+          // Pattern 8: iframe src URLs
+          $html.find("iframe[src]").each(function () {
+            var src = $(this).attr("src") || "";
+            if (src && src.length > 5) {
+              found.push({
+                title: cls.name,
+                id: src,
+                className: cls.name,
+                isSlideUrl: true,
+                typeId: typeId,
+              });
+            }
+          });
+          var itemsFound = found.length - itemsBefore;
+          if (itemsFound > 0) {
+            console.log(
+              "[PESUClaw] Found " +
+                itemsFound +
+                " items for " +
+                typeLabel +
+                " class=" +
+                cls.name +
+                " (classId=" +
+                cls.id +
+                "). IDs: " +
+                found
+                  .slice(itemsBefore)
+                  .map(function (it) {
+                    return it.id;
+                  })
+                  .join(", "),
+            );
+          } else if (response.length > 100) {
+            console.log(
+              "[PESUClaw] DEBUG: No items for " +
+                typeLabel +
+                " class=" +
+                cls.name +
+                " (classId=" +
+                cls.id +
+                "). Response length=" +
+                response.length +
+                ". First 2000 chars:",
+              response.substring(0, 2000),
+            );
+          }
+        }
+        var seenKeys = new Set();
+        return found.filter(function (it) {
+          var key = (it.isSlideUrl ? "u:" : "d:") + it.id;
+          if (seenKeys.has(key)) return false;
+          seenKeys.add(key);
+          return true;
+        });
+      }
+
       async function fetchAndRender(force) {
-        var subjectid = null;
         // Cancel previous fetch by bumping version
         _fetchVersion++;
         var myVersion = _fetchVersion;
         _fetching = false; // allow re-entry
+        if (_bulkRunning) return;
 
-        var activeUnitText = getActiveUnitText();
+        var unitKey = getActiveUnitText();
+        if (!cache[unitKey]) cache[unitKey] = {};
+        var cachedUnit = cache[unitKey];
 
-        // Initialize cache for this unit if needed
-        if (!cache[activeUnitText]) cache[activeUnitText] = {};
-        var cachedUnit = cache[activeUnitText];
-
-        // Check if selected type is already cached
-        if (!force && cachedUnit.hasOwnProperty(selectedType)) {
-          console.log(
-            "[PESUClaw] Cache hit: " + activeUnitText + " type=" + selectedType,
-          );
-          renderItems(activeUnitText, cachedUnit, true);
+        // Only scan the selected types that aren't cached yet
+        var typesToFetch = force
+          ? selectedTypes.slice()
+          : selectedTypes.filter(function (tid) {
+              return !cachedUnit.hasOwnProperty(tid);
+            });
+        if (!typesToFetch.length) {
+          console.log("[PESUClaw] Cache hit: " + unitKey);
+          renderItems(unitKey, cachedUnit, true);
           return;
         }
-        var typesToFetch = [selectedType];
 
         _fetching = true;
         refetchBtn.prop("disabled", true).css("opacity", 0.5);
-        titleDiv.text("Loading " + activeUnitText + "...");
-        statusDiv.text("Detecting subject...");
+        titleDiv.text("Loading " + unitKey + "...");
+        statusDiv.text("Detecting course content...");
         contentArea.empty();
         progressWrap.show();
-        progressBar.css("width", "5%");
+        progressBar.css("width", "20%");
 
         // Helper to check if this fetch is still current
         function isCancelled() {
@@ -1165,115 +1840,26 @@
         }
 
         try {
-          // Step 2-4: PESU now exposes course-content IDs directly in the page.
-          // The old /getCourse endpoint returns 403, so don't use it.
-
-          statusDiv.text("Detecting course content...");
-          progressBar.css("width", "20%");
-
-          var classes = [];
-          var seenClassIds = new Set();
-
-          // Get the currently active unit
-          var $activeUnit = $("#courselistunit li.active a").first();
-
+          // PESU exposes course-content IDs directly in the page.
+          // (The old /getCourse endpoint returns 403, so it isn't used.)
+          var $activeUnit = getActiveUnitAnchor();
           if (!$activeUnit.length) {
             throw new Error("Could not determine active PESU unit");
           }
-
-          // Get the actual PESU unit ID from:
-          // onclick="handleclassUnit('69837')"
-          var unitMatch = ($activeUnit.attr("onclick") || "").match(
-            /handleclassUnit\s*\(\s*['"]([^'"]+)['"]/,
-          );
-
-          if (!unitMatch) {
+          var activeUnitId = parseUnitId($activeUnit);
+          if (!activeUnitId) {
             throw new Error("Could not determine active unit ID");
           }
+          var activeUnitText = getUnitLabel($activeUnit) || unitKey;
+          unitLabels[unitKey] = activeUnitText;
+          console.log("[PESUClaw] Active unit:", activeUnitText, "| ID:", activeUnitId);
 
-          var activeUnitId = unitMatch[1];
-
-          var activeUnitText =
-            $activeUnit.attr("title") || $activeUnit.text().trim();
-
-          console.log(
-            "[PESUClaw] Active unit:",
-            activeUnitText,
-            "| ID:",
-            activeUnitId,
-          );
-
-          // PESU changes the active unit tab first, then updates
-          // #CourseContentId asynchronously.
-          //
-          // Therefore, when switching units while PESUClaw is open,
-          // the DOM may still contain the PREVIOUS unit's rows.
-          //
-          // Wait until the course-content rows actually belong
-          // to the currently active unit.
-
-          var contentReady = false;
-          var maxAttempts = 50; // 5 seconds maximum
-          var attempt = 0;
-
-          while (!contentReady && attempt < maxAttempts) {
-            if (isCancelled()) {
-              _fetching = false;
-              return;
-            }
-
-            var matchingRows = 0;
-
-            $(
-              '#CourseContentId [onclick*="handleclasscoursecontentunit"]',
-            ).each(function () {
-              var onclick = $(this).attr("onclick") || "";
-
-              var m = onclick.match(
-                /handleclasscoursecontentunit\s*\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]/,
-              );
-
-              if (!m) return;
-
-              var currentUnitId = m[3];
-
-              if (currentUnitId === activeUnitId) {
-                matchingRows++;
-              }
-            });
-
-            if (matchingRows > 0) {
-              contentReady = true;
-
-              console.log(
-                "[PESUClaw] Course content updated for unit",
-                activeUnitId,
-                "| matching rows:",
-                matchingRows,
-              );
-
-              break;
-            }
-
-            attempt++;
-
-            if (attempt === 1) {
-              console.log(
-                "[PESUClaw] Waiting for PESU to update course content...",
-              );
-            }
-
-            await new Promise(function (resolve) {
-              setTimeout(resolve, 100);
-            });
-          }
-
-          if (isCancelled()) {
+          var readiness = await waitForUnitReady(activeUnitId, isCancelled, 50);
+          if (readiness === "cancelled" || isCancelled()) {
             _fetching = false;
             return;
           }
-
-          if (!contentReady) {
+          if (readiness !== "ready") {
             throw new Error(
               "PESU course content did not update for unit " + activeUnitId,
             );
@@ -1281,89 +1867,22 @@
 
           // Now that the DOM definitely contains the active unit,
           // collect ONLY its course-content rows.
-
-          var classes = [];
-          var seenClassIds = new Set();
-
-          $('#CourseContentId [onclick*="handleclasscoursecontentunit"]').each(
-            function () {
-              var onclick = $(this).attr("onclick") || "";
-
-              var m = onclick.match(
-                /handleclasscoursecontentunit\s*\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]/,
-              );
-
-              if (!m) return;
-
-              var classId = m[1];
-              var currentSubjectId = m[2];
-              var currentUnitId = m[3];
-
-              // Ignore content from every other unit.
-              if (currentUnitId !== activeUnitId) {
-                return;
-              }
-
-              // Get subject ID from the first matching content item.
-              if (!subjectid) {
-                subjectid = currentSubjectId;
-              }
-
-              // Same UUID occurs multiple times because the same
-              // row has multiple resource-type links.
-              if (seenClassIds.has(classId)) {
-                return;
-              }
-
-              seenClassIds.add(classId);
-
-              var $row = $(this).closest("tr");
-
-              var name = $row.length
-                ? $row.find("td").first().text().replace(/\s+/g, " ").trim()
-                : $(this).text().replace(/\s+/g, " ").trim();
-
-              if (!name) {
-                name = "Course Content " + (classes.length + 1);
-              }
-
-              classes.push({
-                id: classId,
-                name: name,
-                subjectId: currentSubjectId,
-                unitId: currentUnitId,
-              });
-            },
-          );
-
+          var collected = collectClasses(activeUnitId);
+          var subjectid = collected.subjectid;
+          var classes = collected.classes;
           if (!subjectid) {
             throw new Error(
               "Could not determine subject ID from active unit content",
             );
           }
-
           console.log(
-            "[PESUClaw] Unit:",
-            activeUnitText,
-            "| ID:",
-            activeUnitId,
-            "| Subject:",
-            subjectid,
-            "| Content found:",
-            classes.length,
+            "[PESUClaw] Unit:", activeUnitText, "| ID:", activeUnitId,
+            "| Subject:", subjectid, "| Content found:", classes.length,
           );
-
           console.log(
             "[PESUClaw] Content IDs:",
             classes.map(function (c) {
-              return c.id + " → " + c.name;
-            }),
-          );
-
-          console.log(
-            "[PESUClaw] Content IDs:",
-            classes.map(function (c) {
-              return c.id + " → " + c.name;
+              return c.id + " \u2192 " + c.name;
             }),
           );
 
@@ -1376,9 +1895,7 @@
             return;
           }
 
-          if (isCancelled()) return;
-
-          // Step 5: scan download links for each selected resource type
+          // Scan download links for each selected resource type
           var newItems = {};
           typesToFetch.forEach(function (tid) {
             newItems[tid] = [];
@@ -1399,210 +1916,25 @@
                 }
               }
               step++;
-              var pct = 25 + Math.round((step / totalSteps) * 70);
+              progressBar.css("width", 25 + Math.round((step / totalSteps) * 70) + "%");
               statusDiv.text(
-                "Scanning " +
-                  typeLabel +
-                  " " +
-                  (i + 1) +
-                  "/" +
-                  classes.length +
-                  ": " +
-                  cls.name,
+                "Scanning " + typeLabel + " " + (i + 1) + "/" + classes.length + ": " + cls.name,
               );
-              progressBar.css("width", pct + "%");
               if (isCancelled()) {
                 _fetching = false;
                 return;
               }
 
               try {
-                var response = await $.get(
-                  "/Academy/s/studentProfilePESUAdmin",
-                  {
-                    url: "studentProfilePESUAdmin",
-                    controllerMode: "6403",
-                    actionType: "60",
-                    selectedData: subjectid,
-                    id: typeId,
-                    unitid: cls.id,
-                  },
-                );
-                if (typeof response === "string") {
-                  var $html = $("<div>").html(response);
-                  var itemsBefore = newItems[typeId].length;
-                  // Pattern 1: onclick with downloadcoursedoc('id')
-                  $html
-                    .find('[onclick*="downloadcoursedoc"]')
-                    .each(function () {
-                      var onclick = $(this).attr("onclick") || "";
-                      var m = onclick.match(/downloadcoursedoc\('([^']+)'\)/);
-                      if (m) {
-                        newItems[typeId].push({
-                          title: $(this).text().trim() || cls.name,
-                          id: m[1],
-                          className: cls.name,
-                          typeId: typeId,
-                        });
-                      }
-                    });
-                  // Pattern 2: onclick with downloadslidecoursedoc / loadIframe
-                  $html
-                    .find('[onclick*="downloadslidecoursedoc"]')
-                    .each(function () {
-                      var onclick = $(this).attr("onclick") || "";
-                      var m = onclick.match(/loadIframe\('([^']+)'/);
-                      if (m) {
-                        var slideUrl = m[1].split("#")[0];
-                        newItems[typeId].push({
-                          title: $(this).text().trim() || cls.name,
-                          id: slideUrl,
-                          className: cls.name,
-                          isSlideUrl: true,
-                          typeId: typeId,
-                        });
-                      }
-                    });
-                  // Pattern 3: <a> tags with href containing downloadcoursedoc
-                  $html.find('a[href*="downloadcoursedoc"]').each(function () {
-                    var href = $(this).attr("href") || "";
-                    var m = href.match(/downloadcoursedoc\/([^/?#]+)/);
-                    if (m) {
-                      newItems[typeId].push({
-                        title: $(this).text().trim() || cls.name,
-                        id: m[1],
-                        className: cls.name,
-                        typeId: typeId,
-                      });
-                    }
-                  });
-                  // Pattern 4: any onclick with download-related function calls (broad catch)
-                  $html.find("[onclick]").each(function () {
-                    var onclick = $(this).attr("onclick") || "";
-                    if (
-                      onclick.includes("downloadcoursedoc") ||
-                      onclick.includes("downloadslidecoursedoc")
-                    )
-                      return;
-                    var patterns = [
-                      /download[A-Za-z]*\('([^']+)'\)/,
-                      /downloadDoc\('([^']+)'\)/,
-                      /downloadFile\('([^']+)'\)/,
-                    ];
-                    for (var pi = 0; pi < patterns.length; pi++) {
-                      var m = onclick.match(patterns[pi]);
-                      if (m) {
-                        newItems[typeId].push({
-                          title: $(this).text().trim() || cls.name,
-                          id: m[1],
-                          className: cls.name,
-                          typeId: typeId,
-                        });
-                        break;
-                      }
-                    }
-                  });
-                  // Pattern 5: <a> tags with href containing referenceMeterials (PESU's spelling)
-                  $html.find('a[href*="referenceMeterials"]').each(function () {
-                    var href = $(this).attr("href") || "";
-                    var m = href.match(/referenceMeterials\/[^/]+\/([^/?#]+)/);
-                    if (m) {
-                      newItems[typeId].push({
-                        title: $(this).text().trim() || cls.name,
-                        id: m[1],
-                        className: cls.name,
-                        typeId: typeId,
-                      });
-                    }
-                  });
-                  // Pattern 6: video <source> tags (for QA/QB video content)
-                  $html.find("source[src], video[src]").each(function () {
-                    var src = $(this).attr("src") || "";
-                    if (src) {
-                      newItems[typeId].push({
-                        title: cls.name,
-                        id: src,
-                        className: cls.name,
-                        isSlideUrl: true,
-                        typeId: typeId,
-                      });
-                    }
-                  });
-                  // Pattern 7: video URLs in JavaScript (e.g. var videoSrc = '...')
-                  var videoMatches = response.match(
-                    /(?:src|videoSrc|videoUrl|source)\s*[:=]\s*['"]([^'"]+\.(?:mp4|webm|ogg|m3u8)[^'"]*)['"]/gi,
-                  );
-                  if (videoMatches) {
-                    videoMatches.forEach(function (vm) {
-                      var m2 = vm.match(/['"]([^'"]+)['"]\s*$/);
-                      if (m2) {
-                        newItems[typeId].push({
-                          title: cls.name,
-                          id: m2[1],
-                          className: cls.name,
-                          isSlideUrl: true,
-                          typeId: typeId,
-                        });
-                      }
-                    });
-                  }
-                  // Pattern 8: iframe src URLs
-                  $html.find("iframe[src]").each(function () {
-                    var src = $(this).attr("src") || "";
-                    if (src && src.length > 5) {
-                      newItems[typeId].push({
-                        title: cls.name,
-                        id: src,
-                        className: cls.name,
-                        isSlideUrl: true,
-                        typeId: typeId,
-                      });
-                    }
-                  });
-                  var itemsFound = newItems[typeId].length - itemsBefore;
-                  if (itemsFound > 0) {
-                    console.log(
-                      "[PESUClaw] Found " +
-                        itemsFound +
-                        " items for " +
-                        typeLabel +
-                        " class=" +
-                        cls.name +
-                        " (classId=" +
-                        cls.id +
-                        "). IDs: " +
-                        newItems[typeId]
-                          .slice(itemsBefore)
-                          .map(function (it) {
-                            return it.id;
-                          })
-                          .join(", "),
-                    );
-                  } else if (response.length > 100) {
-                    console.log(
-                      "[PESUClaw] DEBUG: No items for " +
-                        typeLabel +
-                        " class=" +
-                        cls.name +
-                        " (classId=" +
-                        cls.id +
-                        "). Response length=" +
-                        response.length +
-                        ". First 2000 chars:",
-                      response.substring(0, 2000),
-                    );
-                  }
-                }
+                var found = await scanClassForType(subjectid, cls, typeId, typeLabel);
+                newItems[typeId] = newItems[typeId].concat(found);
               } catch (err) {
                 console.warn(
                   "[PESUClaw] warn: " + cls.name + " (" + typeLabel + ")",
                   err.statusText || err,
                 );
               }
-              if (step < totalSteps)
-                await new Promise(function (r) {
-                  setTimeout(r, 300);
-                });
+              if (step < totalSteps) await sleep(300);
               if (isCancelled()) {
                 _fetching = false;
                 return;
@@ -1621,19 +1953,12 @@
           typesToFetch.forEach(function (tid) {
             cachedUnit[tid] = newItems[tid];
           });
-
           var totalCached = 0;
           Object.keys(cachedUnit).forEach(function (k) {
             totalCached += cachedUnit[k].length;
           });
-          console.log(
-            "[PESUClaw] Cached: " +
-              activeUnitText +
-              " (" +
-              totalCached +
-              " total items)",
-          );
-          renderItems(activeUnitText, cachedUnit, false);
+          console.log("[PESUClaw] Cached: " + unitKey + " (" + totalCached + " total items)");
+          renderItems(unitKey, cachedUnit, false);
         } catch (err) {
           console.error("[PESUClaw] Fetch error:", err);
           titleDiv.text("Error");
@@ -1659,6 +1984,7 @@
           if (newTab && newTab !== _lastActiveTab) {
             console.log("[PESUClaw] Tab: " + _lastActiveTab + " -> " + newTab);
             _lastActiveTab = newTab;
+            if (_bulkRunning) return; // tabs are being switched by PESUClaw itself
             if (container.is(":visible")) {
               navBtn.addClass("active");
               fetchAndRender();
