@@ -5,6 +5,19 @@ All notable changes to PESUClaw will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-11-02
+
+### Added
+- Added per-file selection with All/None controls and quick filtering for resource lists.
+- Added multi-type downloads and one-click all-unit downloads, with organized ZIP folders and cancellation support.
+- Added bookmarks to merged PDFs and the Office merge helper output.
+- Added automatic Office file detection and a bundled merge helper with setup scripts.
+
+### Changed
+- Redesigned the download panel with a consistent dark theme, clearer loading and progress states, keyboard focus styles, and richer result summaries.
+- Improved archive and Office-file naming so downloaded files keep their actual extensions.
+- Removed duplicate resource links found within the same class.
+
 ## [1.2.7] - 2026-10-30
 
 ### Changed

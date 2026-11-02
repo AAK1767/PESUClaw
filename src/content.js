@@ -89,72 +89,113 @@
       $("#pesu-dl-helper").remove();
       $("#pesu-dl-tab-btn").remove();
 
-      // Tab button
+      // ─── Icons (inline SVG, inherit currentColor) ───
+      function svg(inner) {
+        return (
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+          'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+          inner +
+          "</svg>"
+        );
+      }
+      var ICONS = {
+        logo: svg('<path d="M12 3v11"/><path d="m7.5 10 4.5 4.5 4.5-4.5"/><path d="M4 17v1.5A2.5 2.5 0 0 0 6.5 21h11a2.5 2.5 0 0 0 2.5-2.5V17"/>'),
+        download: svg('<path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/>'),
+        refresh: svg('<path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/>'),
+        close: svg('<path d="M18 6 6 18"/><path d="m6 6 12 12"/>'),
+        chevron: svg('<path d="m6 9 6 6 6-6"/>'),
+        layers: svg('<path d="m12 2 10 5-10 5L2 7z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/>'),
+        folder: svg('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'),
+        alert: svg('<circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16.5v.01"/>'),
+      };
+
+      // ─── Build DOM ───
+      $("#pesu-dl-helper").remove();
+      $("#pesu-dl-tab-btn").remove();
+
+      // Tab button (inherits PESU's own tab styling; see panel.css)
       const navBtn = $(
         '<li id="pesu-dl-tab-btn"><a href="javascript:void(0)">PESUClaw</a></li>',
       );
       $("#courselistunit").append(navBtn);
 
       // Panel
-      const container = $('<div id="pesu-dl-helper"></div>');
+      const container = $(
+        '<div id="pesu-dl-helper" role="dialog" aria-label="PESUClaw"></div>',
+      );
       const updateNotice = $('<div class="pesu-dl-update"></div>').hide();
       const titleDiv = $('<div id="pesu-dl-title"></div>');
-      const statusDiv = $('<div id="pesu-dl-status"></div>');
+      const statusDiv = $(
+        '<div id="pesu-dl-status" role="status" aria-live="polite"></div>',
+      );
 
       const progressWrap = $('<div class="pesu-dl-progress-wrap"></div>');
       const progressBar = $('<div class="pesu-dl-progress-bar"></div>');
       progressWrap.append(progressBar);
-      const cancelBtn = $('<button class="pesu-dl-btn-cancel"></button>')
+      const cancelBtn = $('<button type="button" class="pesu-dl-btn-cancel"></button>')
         .text("Cancel")
-        .css({ margin: "6px 0", fontSize: "12px" })
-        .hide()
         .on("click", function () {
           _bulkCancel = true;
-          statusDiv.text("Cancelling...");
+          statusDiv.attr("data-kind", "loading").text("Cancelling...");
         });
+      const statusWrap = $('<div class="pesu-statusbar"></div>')
+        .append(statusDiv)
+        .append(progressWrap)
+        .append(cancelBtn);
 
       const contentArea = $('<div id="pesu-dl-content"></div>');
+      const actionsArea = $('<div class="pesu-dl-actions"></div>').hide();
 
-      // Footer: version + links to GitHub releases
-      const footerStatus = $("<span></span>");
-      const footer = $('<div class="pesu-dl-footer"></div>').css({
-        marginTop: "12px",
-        paddingTop: "8px",
-        borderTop: "1px solid rgba(128,128,128,0.25)",
-        fontSize: "11px",
-        textAlign: "center",
-        opacity: "0.75",
-      });
-      footer
-        .append(document.createTextNode("PESUClaw v" + PESUCLAW_VERSION + " \u00b7 "))
+      // Footer: version, links, update state
+      const footerStatus = $('<span id="pesu-foot-status"></span>');
+      const footer = $('<div class="pesu-dl-footer"></div>')
+        .append($("<span></span>").text("PESUClaw v" + PESUCLAW_VERSION))
         .append(
-          $("<a>")
-            .attr({ href: releasePageUrl, target: "_blank", rel: "noreferrer" })
-            .text("Latest releases"),
-        )
-        .append(document.createTextNode(" \u00b7 "))
-        .append(
-          $("<a>")
-            .attr({ href: repoUrl, target: "_blank", rel: "noreferrer" })
-            .text("GitHub"),
-        )
-        .append(footerStatus);
+          $('<span class="pesu-foot-links"></span>')
+            .append(footerStatus)
+            .append($('<span class="pesu-foot-sep">\u00b7</span>'))
+            .append(
+              $("<a>")
+                .attr({ href: releasePageUrl, target: "_blank", rel: "noreferrer" })
+                .text("Latest releases"),
+            )
+            .append($('<span class="pesu-foot-sep">\u00b7</span>'))
+            .append(
+              $("<a>")
+                .attr({ href: repoUrl, target: "_blank", rel: "noreferrer" })
+                .text("GitHub"),
+            ),
+        );
 
+      // Header
       const topBar = $('<div class="pesu-dl-topbar"></div>');
       const refetchBtn = $(
-        '<button class="pesu-dl-btn-refresh" title="Refresh"></button>',
-      ).html("&#8635;");
-      const closeBtn = $('<button class="pesu-dl-btn-close"></button>').html(
-        "&times;",
-      );
+        '<button type="button" class="pesu-dl-btn-refresh" title="Rescan this unit" aria-label="Rescan this unit"></button>',
+      ).html(ICONS.refresh);
+      const closeBtn = $(
+        '<button type="button" class="pesu-dl-btn-close" title="Close" aria-label="Close"></button>',
+      ).html(ICONS.close);
       topBar.append(refetchBtn).append(closeBtn);
+      const header = $('<div class="pesu-hdr"></div>')
+        .append(
+          $('<div class="pesu-brand"></div>')
+            .append($('<span class="pesu-logo"></span>').html(ICONS.logo))
+            .append(
+              $('<div class="pesu-brand-text"></div>')
+                .append($('<div class="pesu-brand-name">PESUClaw</div>'))
+                .append(titleDiv),
+            ),
+        )
+        .append(topBar);
 
       // ─── Type toggle bar (multi-select) ───
       var typeBar = $('<div class="pesu-dl-type-bar"></div>');
       RESOURCE_TYPES.forEach(function (rt) {
-        var tbtn = $('<button class="pesu-dl-type-btn"></button>')
-          .text(rt.label)
+        var tbtn = $('<button type="button" class="pesu-dl-type-btn"></button>')
+          .append($('<span class="pesu-dl-type-label"></span>').text(rt.label))
+          .append($('<span class="pesu-dl-count"></span>'))
           .attr("data-type-id", rt.id)
+          .attr("aria-pressed", selectedTypes.indexOf(rt.id) >= 0 ? "true" : "false")
           .attr("title", "Click to add or remove. Select several to download them together.");
         if (selectedTypes.indexOf(rt.id) >= 0) tbtn.addClass("selected");
         tbtn.on("click", function () {
@@ -164,16 +205,16 @@
           if (pos >= 0) {
             if (selectedTypes.length === 1) return; // keep at least one
             selectedTypes.splice(pos, 1);
-            $(this).removeClass("selected");
+            $(this).removeClass("selected").attr("aria-pressed", "false");
           } else {
             selectedTypes.push(tid);
-            $(this).addClass("selected");
+            $(this).addClass("selected").attr("aria-pressed", "true");
           }
           // Cancel any in-progress fetch
           if (_fetching) {
             _fetchVersion++;
             _fetching = false;
-            refetchBtn.prop("disabled", false).css("opacity", 1);
+            refetchBtn.prop("disabled", false);
           }
           if (container.is(":visible")) {
             renderOrFetch();
@@ -181,22 +222,93 @@
         });
         typeBar.append(tbtn);
       });
+      const typeWrap = $('<div class="pesu-types"></div>')
+        .append(
+          $('<div class="pesu-caption"></div>')
+            .text("Resources ")
+            .append($("<span></span>").text("\u00b7 pick one or more")),
+        )
+        .append(typeBar);
 
       container
-        .append(topBar)
-        .append(typeBar)
+        .append(header)
         .append(updateNotice)
-        .append(titleDiv)
-        .append(statusDiv)
-        .append(progressWrap)
-        .append(cancelBtn)
+        .append(typeWrap)
+        .append(statusWrap)
         .append(contentArea)
+        .append(actionsArea)
         .append(footer);
-      closeBtn.on("click", function () {
-        container.slideUp(200);
-        navBtn.removeClass("active");
-      });
       $("body").append(container);
+
+      function openPanel() {
+        container.addClass("pesu-open");
+        navBtn.addClass("active");
+      }
+      function closePanel() {
+        container.removeClass("pesu-open");
+        navBtn.removeClass("active");
+      }
+      closeBtn.on("click", closePanel);
+      // Esc closes the panel (namespaced so re-injection doesn't stack handlers)
+      $(document)
+        .off("keydown.pesuclaw")
+        .on("keydown.pesuclaw", function (e) {
+          if (e.key === "Escape" && container.is(":visible") && !_bulkRunning) {
+            closePanel();
+          }
+        });
+
+      // ─── View helpers ───
+      function makeBtn(cls, iconName, label) {
+        return $('<button type="button" class="pesu-btn ' + cls + '"></button>')
+          .append($('<span class="pesu-btn-ico"></span>').html(ICONS[iconName] || ""))
+          .append($('<span class="pesu-btn-label"></span>').text(label));
+      }
+      function setBtnLabel($btn, text) {
+        $btn.find(".pesu-btn-label").text(text);
+      }
+      function setBusy(on) {
+        container.toggleClass("pesu-busy", !!on);
+      }
+      function setStatus(text, kind) {
+        statusDiv
+          .attr("data-kind", kind || "info")
+          .empty()
+          .append($('<div class="pesu-status-text"></div>').text(text));
+      }
+      // Multi-line result summary (each line stacked under the status dot)
+      function setStatusLines(lines, kind) {
+        var $text = $('<div class="pesu-status-text"></div>');
+        lines.forEach(function (line) {
+          $text.append($("<div></div>").text(line));
+        });
+        statusDiv.attr("data-kind", kind || "info").empty().append($text);
+      }
+      function clearView() {
+        contentArea.empty();
+        actionsArea.empty().hide();
+      }
+      function showSkeleton() {
+        var html = "";
+        for (var k = 0; k < 4; k++) html += '<div class="pesu-skel"></div>';
+        contentArea.html(html);
+      }
+      function showEmpty(title, hint, opts) {
+        opts = opts || {};
+        var box = $('<div class="pesu-empty"></div>').toggleClass("is-error", !!opts.error);
+        box.append($('<div class="pesu-empty-ico"></div>').html(opts.error ? ICONS.alert : ICONS.folder));
+        box.append($('<div class="pesu-empty-title"></div>').text(title));
+        if (hint) box.append($('<div class="pesu-empty-hint"></div>').text(hint));
+        if (opts.retry) {
+          var retryBtn = makeBtn("pesu-btn-ghost", "refresh", "Try again");
+          retryBtn.on("click", function () {
+            fetchAndRender(true);
+          });
+          box.append(retryBtn);
+        }
+        contentArea.empty().append(box);
+      }
+      var _refreshSummary = function () {};
 
       function compareVersions(left, right) {
         var leftParts = String(left)
@@ -279,8 +391,8 @@
 
       function setUpdateCheckFailed(message) {
         footerStatus
-          .text(" \u00b7 update check unavailable")
-          .attr("title", message || "");
+          .text("Update check unavailable")
+          .attr({ title: message || "", "data-kind": "warn" });
       }
 
       async function checkForUpdate() {
@@ -337,9 +449,12 @@
         ).replace(/^v/i, "");
         if (!latestVersion) return;
         if (compareVersions(latestVersion, PESUCLAW_VERSION) <= 0) {
-          footerStatus.text(" \u00b7 up to date").attr("title", "");
+          footerStatus.text("Up to date").attr({ title: "", "data-kind": "ok" });
           return;
         }
+          footerStatus
+            .text("Update available")
+            .attr({ title: "", "data-kind": "warn" });
           updateNotice
             .empty()
             .append(
@@ -385,11 +500,9 @@
       // ─── Toggle panel ───
       navBtn.on("click", function () {
         if (container.is(":visible")) {
-          container.slideUp(200);
-          navBtn.removeClass("active");
+          closePanel();
         } else {
-          container.slideDown(200);
-          navBtn.addClass("active");
+          openPanel();
           var currentTab = getActiveUnitText();
           if (currentTab !== _lastRenderedTab) {
             _lastRenderedTab = currentTab;
@@ -442,12 +555,14 @@
         );
       }
 
-      function setItemState(item, cls, text) {
+      // Updates the status chip on a file row (row element id = item._uid)
+      function setItemState(item, state, text) {
         if (!item || !item._uid) return;
         $("#" + item._uid)
-          .removeClass()
-          .addClass("pesu-dl-item " + cls)
-          .text(text);
+          .attr("data-state", state)
+          .find(".pesu-row-state")
+          .text(text)
+          .attr("title", text);
       }
 
       function isUnitAnchor(el) {
@@ -552,7 +667,7 @@
       function renderItems(unitKey, cachedUnit, fromCache) {
         _lastRenderedTab = unitKey;
         var unitLabel = unitLabels[unitKey] || unitKey;
-        contentArea.empty();
+        clearView();
         progressWrap.hide();
 
         var types = getSelectedTypeObjs();
@@ -566,166 +681,234 @@
           })
           .join(" + ");
 
-        titleDiv.text(typeNames + ": " + unitLabel + " (" + totalCount + ")");
-        statusDiv.text(
-          totalCount
-            ? "Ready" + (fromCache ? " \u00b7 cached" : "")
-            : "No files found for " + typeNames,
-        );
+        titleDiv.text(unitLabel);
+
+        // Show how many files each (already scanned) type has on its chip
+        typeBar.find(".pesu-dl-type-btn").each(function () {
+          var tid = $(this).attr("data-type-id");
+          $(this)
+            .find(".pesu-dl-count")
+            .text(cachedUnit.hasOwnProperty(tid) ? cachedUnit[tid].length : "");
+        });
 
         console.log(
           "[PESUClaw] " + typeNames + " " + unitLabel + " \u2014 " + totalCount +
             " files" + (fromCache ? " (cached)" : ""),
         );
 
-        // Bulk actions
-        var bulkRow = $('<div class="pesu-dl-bulk-row"></div>').css({
-          margin: "6px 0 10px",
-        });
-        if (types.length > 1 && totalCount > 0) {
-          var multiBtn = $('<button class="pesu-dl-merge-btn pesu-dl-bulk-btn"></button>')
-            .text("Download selected types (one ZIP)")
-            .css({ marginBottom: "6px" });
-          multiBtn.on("click", function () {
-            runBulk("current", types, multiBtn);
-          });
-          bulkRow.append(multiBtn);
+        var rows = []; // { item, $row, $cb, haystack, visible }
+        var sectionRefs = [];
+        var primaryBtn = null;
+
+        function selectedCount() {
+          return rows.filter(function (r) {
+            return isItemSelected(r.item);
+          }).length;
         }
-        var allBtn = $('<button class="pesu-dl-merge-btn pesu-dl-bulk-btn"></button>')
-          .text("Download all units (one ZIP)")
-          .attr("title", "Visits every unit tab, then bundles the selected types per unit");
+
+        function refreshSummary() {
+          if (container.hasClass("pesu-busy")) return;
+          var n = selectedCount();
+          sectionRefs.forEach(function (sec) {
+            sec.$count.text(sec.items.filter(isItemSelected).length + "/" + sec.items.length);
+          });
+          if (totalCount > 0) {
+            setStatus(
+              n + " of " + totalCount + " file" + (totalCount === 1 ? "" : "s") +
+                " selected" + (fromCache ? " \u00b7 cached" : ""),
+              "info",
+            );
+          }
+          if (primaryBtn) {
+            primaryBtn.removeAttr("data-state").prop("disabled", n === 0);
+            setBtnLabel(
+              primaryBtn,
+              types.length === 1
+                ? "Download " + types[0].label + " \u00b7 " + n + (n === 1 ? " file" : " files")
+                : "Download " + n + (n === 1 ? " file" : " files") + " \u00b7 ZIP",
+            );
+          }
+        }
+        _refreshSummary = refreshSummary;
+
+        // Action bar (primary = this unit, ghost = every unit)
+        var allBtn = makeBtn("pesu-btn-ghost pesu-act-all", "layers", "All units").attr(
+          "title",
+          "Visit every unit and bundle the selected types into one ZIP",
+        );
         allBtn.on("click", function () {
           runBulk("all", types, allBtn);
         });
-        bulkRow.append(allBtn);
-        contentArea.append(bulkRow);
 
-        // One section per selected type
+        if (!totalCount) {
+          setStatus("Nothing found for " + typeNames, "info");
+          showEmpty(
+            "No " + typeNames + " in this unit",
+            "Try another unit or resource type, or rescan if you just opened the course.",
+          );
+          actionsArea.append($('<div class="pesu-btn-row"></div>').append(allBtn)).show();
+          return;
+        }
+
+        primaryBtn = makeBtn("pesu-btn-primary pesu-act-primary", "download", "Download");
+        primaryBtn.on("click", function () {
+          if (types.length === 1) {
+            var chosen = (cachedUnit[types[0].id] || []).filter(isItemSelected);
+            mergeAndDownload(unitLabel, chosen, types[0].label, primaryBtn);
+          } else {
+            runBulk("current", types, primaryBtn);
+          }
+        });
+        actionsArea
+          .append($('<div class="pesu-btn-row"></div>').append(primaryBtn).append(allBtn))
+          .append(
+            $('<div class="pesu-hint"></div>').text(
+              types.length > 1
+                ? "One ZIP \u00b7 a folder per resource type, PDFs merged inside"
+                : "PDFs merge into one file \u00b7 everything else goes in a ZIP",
+            ),
+          )
+          .show();
+
+        // Quick filter for long lists
+        var filterInput = null;
+        function applyFilter() {
+          var q = filterInput ? filterInput.val().trim().toLowerCase() : "";
+          rows.forEach(function (r) {
+            r.visible = !q || r.haystack.indexOf(q) >= 0;
+            r.$row.toggleClass("pesu-hidden", !r.visible);
+          });
+          sectionRefs.forEach(function (sec) {
+            var any = sec.rows.some(function (r) {
+              return r.visible !== false;
+            });
+            sec.$noMatch.css("display", any ? "none" : "block");
+          });
+        }
+        if (totalCount > 6) {
+          filterInput = $('<input type="search" class="pesu-filter" placeholder="Filter files\u2026" aria-label="Filter files">');
+          filterInput.on("input", applyFilter);
+          contentArea.append(filterInput);
+        }
+
+        // One card per selected type
         types.forEach(function (rt) {
           var items = cachedUnit[rt.id] || [];
-          var section = $('<div class="pesu-dl-section"></div>').css({
-            marginTop: "10px",
+          var secRows = [];
+          var $sec = $('<section class="pesu-sec"></section>');
+          var $count = $('<span class="pesu-sec-count"></span>');
+          var $toggle = $('<button type="button" class="pesu-sec-toggle" aria-expanded="true"></button>')
+            .append($('<span class="pesu-sec-chev"></span>').html(ICONS.chevron))
+            .append($("<span></span>").text(rt.label))
+            .append($count);
+          $toggle.on("click", function () {
+            var collapsed = !$sec.hasClass("is-collapsed");
+            $sec.toggleClass("is-collapsed", collapsed);
+            $toggle.attr("aria-expanded", collapsed ? "false" : "true");
           });
-          var head = $('<div class="pesu-dl-section-head"></div>').css({
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            fontWeight: "600",
-            margin: "4px 0",
-          });
-          head.append($("<span></span>").text(rt.label + " (" + items.length + ")"));
-          section.append(head);
-
-          if (!items.length) {
-            section.append(
-              $("<div></div>")
-                .css({ fontSize: "12px", opacity: 0.7 })
-                .text("No files found for " + rt.label),
-            );
-            contentArea.append(section);
-            return;
-          }
-
-          var checkboxes = [];
-          var mergeBtn = $('<button class="pesu-dl-merge-btn"></button>');
-
-          function updateMergeLabel() {
-            var n = items.filter(isItemSelected).length;
-            mergeBtn
-              .text(
-                "Merge & Download " + rt.label +
-                  (n === items.length ? "" : " (" + n + "/" + items.length + ")"),
-              )
-              .prop("disabled", n === 0);
-          }
 
           function setAll(value) {
-            items.forEach(function (t) {
-              t.selected = value;
+            secRows.forEach(function (r) {
+              if (r.visible === false) return;
+              r.item.selected = value;
+              r.$cb.prop("checked", value);
+              r.$row.toggleClass("is-off", !value);
             });
-            checkboxes.forEach(function ($cb) {
-              $cb.prop("checked", value);
-            });
-            updateMergeLabel();
+            refreshSummary();
           }
 
-          var linkCss = { cursor: "pointer", fontSize: "11px", fontWeight: "normal" };
-          head.append(
-            $("<span></span>")
-              .append(
-                $('<a href="javascript:void(0)">All</a>').css(linkCss).on("click", function () {
-                  setAll(true);
-                }),
-              )
-              .append(document.createTextNode(" / "))
-              .append(
-                $('<a href="javascript:void(0)">None</a>').css(linkCss).on("click", function () {
-                  setAll(false);
-                }),
-              ),
-          );
+          var $tools = $('<div class="pesu-sec-tools"></div>')
+            .append(
+              $('<button type="button" class="pesu-link">All</button>').on("click", function () {
+                setAll(true);
+              }),
+            )
+            .append($('<span class="pesu-foot-sep">\u00b7</span>'))
+            .append(
+              $('<button type="button" class="pesu-link">None</button>').on("click", function () {
+                setAll(false);
+              }),
+            );
 
-          mergeBtn.on("click", function () {
-            mergeAndDownload(unitLabel, items.filter(isItemSelected), rt.label, mergeBtn);
-          });
-          section.append(mergeBtn);
+          $sec.append($('<div class="pesu-sec-head"></div>').append($toggle).append($tools));
+
+          var $noMatch = $('<div class="pesu-nomatch"></div>').text("No files match your filter");
+          var $list = $('<ul class="pesu-list"></ul>');
+
+          if (!items.length) {
+            $list.append(
+              $('<li class="pesu-row"></li>').append(
+                $('<span class="pesu-row-main"></span>').append(
+                  $('<span class="pesu-row-sub"></span>').text("No files found for " + rt.label),
+                ),
+              ),
+            );
+          }
 
           items.forEach(function (t, idx) {
-            var displayTitle = t.title;
-            // If title matches another item's title, append class name for clarity
-            var dupeCount = items.filter(function (x) {
-              return x.title === t.title;
-            }).length;
-            if (dupeCount > 1 && t.className && t.className !== t.title) {
-              displayTitle = t.title + " [" + t.className + "]";
-            }
             t._uid = "pesu-dl-item-" + rt.id + "-" + idx;
+            var sub = t.className && t.className !== t.title ? t.className : "";
 
-            var row = $('<div class="pesu-dl-row"></div>').css({
-              display: "flex",
-              alignItems: "center",
-              gap: "6px",
-            });
-            var cb = $('<input type="checkbox">')
+            var $cb = $('<input type="checkbox" class="pesu-chk">')
               .prop("checked", isItemSelected(t))
-              .attr("title", "Include in Merge & Download")
-              .css({ flex: "0 0 auto", margin: 0 });
-            cb.on("change", function () {
+              .attr("aria-label", "Include " + t.title);
+            var $text = $('<span class="pesu-row-text"></span>').append(
+              $('<span class="pesu-row-title"></span>').text(t.title).attr("title", t.title),
+            );
+            if (sub) $text.append($('<span class="pesu-row-sub"></span>').text(sub).attr("title", sub));
+
+            var $dl = $('<button type="button" class="pesu-row-dl"></button>')
+              .html(ICONS.download)
+              .attr({ title: "Download only this file", "aria-label": "Download " + t.title });
+
+            var $row = $('<li class="pesu-row" id="' + t._uid + '"></li>')
+              .toggleClass("is-off", !isItemSelected(t))
+              .append(
+                $('<label class="pesu-row-main"></label>').append($cb).append($text),
+              )
+              .append($('<span class="pesu-row-state"></span>'))
+              .append($dl);
+
+            $cb.on("change", function () {
               t.selected = this.checked;
-              updateMergeLabel();
+              $row.toggleClass("is-off", !this.checked);
+              refreshSummary();
             });
-            checkboxes.push(cb);
 
-            var btn = $('<button class="pesu-dl-item" id="' + t._uid + '"></button>')
-              .css({ flex: "1 1 auto", minWidth: 0 })
-              .text(idx + 1 + ". " + displayTitle);
-
-            btn.on("click", function () {
-              var itemButton = $(this);
-              itemButton.prop("disabled", true).text(t.title + " \u2014 fetching");
+            $dl.on("click", function () {
+              $dl.prop("disabled", true);
+              setItemState(t, "busy", "fetching\u2026");
               downloadIndividualItem(t, idx)
                 .then(function () {
-                  itemButton
-                    .prop("disabled", false)
-                    .addClass("done")
-                    .text(t.title + " \u2014 done");
+                  setItemState(t, "done", "downloaded");
                 })
                 .catch(function (error) {
                   console.error("[PESUClaw] Individual download failed:", error);
-                  itemButton
-                    .prop("disabled", false)
-                    .addClass("failed")
-                    .text(t.title + " \u2014 failed");
+                  setItemState(t, "failed", "failed");
+                })
+                .then(function () {
+                  $dl.prop("disabled", false);
                 });
             });
 
-            row.append(cb).append(btn);
-            section.append(row);
+            var rowRef = {
+              item: t,
+              $row: $row,
+              $cb: $cb,
+              haystack: (t.title + " " + (t.className || "")).toLowerCase(),
+              visible: true,
+            };
+            rows.push(rowRef);
+            secRows.push(rowRef);
+            $list.append($row);
           });
 
-          updateMergeLabel();
-          contentArea.append(section);
+          $sec.append($list).append($noMatch);
+          contentArea.append($sec);
+          sectionRefs.push({ items: items, rows: secRows, $count: $count, $noMatch: $noMatch });
         });
+
+        refreshSummary();
       }
 
       // ─── Merge & download logic ───
@@ -1253,14 +1436,10 @@ if __name__ == '__main__':
                   pageIndex: startPage,
                 });
                 res.pdfCount++;
-                setItemState(
-                  item,
-                  "merged",
-                  item.title + " \u2014 " + srcPdf.getPageCount() + "pg merged",
-                );
+                setItemState(item, "merged", srcPdf.getPageCount() + " pg merged");
               } catch (e) {
                 res.failed++;
-                setItemState(item, "failed", item.title + " \u2014 error");
+                setItemState(item, "failed", "error");
               }
             } else {
               var ext = preservedExt || archiveExt;
@@ -1271,15 +1450,11 @@ if __name__ == '__main__':
               }
               if (isArchiveExtension(ext)) res.archiveCount++;
               var finalName = addOtherFile(item, i, ext, arrayBuf);
-              setItemState(
-                item,
-                "zipped",
-                item.title + " \u2014 zipped (" + finalName.split(".").pop() + ")",
-              );
+              setItemState(item, "zipped", "zipped ." + finalName.split(".").pop());
             }
           } catch (err) {
             res.failed++;
-            setItemState(item, "failed", item.title + " \u2014 failed");
+            setItemState(item, "failed", "failed");
           }
 
           if (i < items.length - 1) await sleep(200);
@@ -1326,10 +1501,13 @@ if __name__ == '__main__':
       // ─── Single type: merged PDF + ZIP of the other files ───
       async function mergeAndDownload(unitText, items, typeName, btn) {
         if (!items.length) {
-          statusDiv.text("Nothing selected to download");
+          setStatus("Nothing selected to download", "info");
           return;
         }
-        btn.text("Downloading...").prop("disabled", true);
+        setBtnLabel(btn, "Working\u2026");
+        btn.removeAttr("data-state").prop("disabled", true);
+        setBusy(true);
+        setStatus("Starting\u2026", "loading");
         progressWrap.show();
 
         var safeName = safeFileName(unitText, "files");
@@ -1352,8 +1530,8 @@ if __name__ == '__main__':
             var pdfBlob = new Blob([pdfBytes], { type: "application/pdf" });
             triggerDownload(pdfBlob, safeName + "_" + typeName + "_Merged.pdf");
             statusParts.push(
-              res.pdfCount + " PDFs merged \u00b7 " + res.mergedPdf.getPageCount() +
-                " pages \u00b7 " + formatSize(pdfBlob.size),
+              res.pdfCount + (res.pdfCount === 1 ? " PDF" : " PDFs") + " merged \u00b7 " +
+                res.mergedPdf.getPageCount() + " pages \u00b7 " + formatSize(pdfBlob.size),
             );
           }
 
@@ -1378,37 +1556,40 @@ if __name__ == '__main__':
             var zipBlob = await zip.generateAsync({ type: "blob" });
             triggerDownload(zipBlob, safeName + "_" + typeName + "_files.zip");
             statusParts.push(
-              res.otherFiles.length + " files zipped" +
-                (res.officeFiles.length ? " \u00b7 merge_office_files.py included" : "") +
+              res.otherFiles.length + (res.otherFiles.length === 1 ? " file" : " files") +
+                " zipped" +
+                (res.officeFiles.length ? " \u00b7 merge script included" : "") +
                 " \u00b7 " + formatSize(zipBlob.size),
             );
           }
 
-          if (res.pdfCount > 0 || res.otherFiles.length > 0) {
-            statusParts.unshift(
-              items.length - res.failed + " processed \u00b7 " + res.pdfCount +
-                " PDFs merged \u00b7 " + (res.otherFiles.length - res.archiveCount) +
-                " Office/other files \u00b7 " + res.archiveCount + " archives",
-            );
-          }
-
           if (res.pdfCount === 0 && res.otherFiles.length === 0) {
-            btn.text("No files downloaded").css("background", "#c62828");
-            statusDiv.text(
+            btn.attr("data-state", "error");
+            setBtnLabel(btn, "Nothing downloaded");
+            setStatus(
               "Could not process any files." + (res.failed ? " " + res.failed + " failed." : ""),
+              "error",
             );
           } else {
-            btn.text("Done").css("background", "#2e7d32");
-            statusDiv.html(
-              statusParts.join("<br>") + (res.failed ? "<br>" + res.failed + " failed" : ""),
-            );
+            btn.attr("data-state", "done");
+            setBtnLabel(btn, "Downloaded");
+            if (res.failed) statusParts.push(res.failed + " failed \u2014 see the red chips");
+            setStatusLines(statusParts, res.failed ? "info" : "ok");
           }
         } catch (err) {
           console.error("[PESUClaw] Merge failed:", err);
-          btn.text("Failed \u2014 retry").prop("disabled", false).css("background", "#c62828");
-          statusDiv.text("Failed: " + (err && err.message ? err.message : err));
+          btn.attr("data-state", "error");
+          setBtnLabel(btn, "Failed \u2014 try again");
+          setStatus("Failed: " + (err && err.message ? err.message : err), "error");
         }
+        btn.prop("disabled", false);
+        setBusy(false);
         progressWrap.hide();
+        // Put the button label back after a moment
+        setTimeout(function () {
+          btn.removeAttr("data-state");
+          _refreshSummary();
+        }, 4500);
       }
 
       // ─── Bulk: selected types of this unit, or every unit, in one ZIP ───
@@ -1444,7 +1625,7 @@ if __name__ == '__main__':
           });
         }
         if (!units.length) {
-          statusDiv.text("Could not find any units");
+          setStatus("Could not find any units", "error");
           _bulkRunning = false;
           return;
         }
@@ -1460,10 +1641,12 @@ if __name__ == '__main__':
         var totals = { pdfs: 0, pages: 0, others: 0, failed: 0 };
         var skippedUnits = [];
         var summaryLines = [];
+        var bulkKind = "info";
 
-        $(".pesu-dl-bulk-btn, .pesu-dl-merge-btn, .pesu-dl-item").prop("disabled", true);
-        refetchBtn.prop("disabled", true).css("opacity", 0.5);
-        btn.text("Working...");
+        setBusy(true);
+        refetchBtn.prop("disabled", true);
+        setBtnLabel(btn, "Working\u2026");
+        setStatus("Starting\u2026", "loading");
         cancelBtn.show();
         progressWrap.show();
         progressBar.css("width", "2%");
@@ -1564,8 +1747,10 @@ if __name__ == '__main__':
 
           if (_bulkCancel) {
             summaryLines.push("Cancelled \u2014 nothing was downloaded.");
+            bulkKind = "info";
           } else if (totals.pdfs + totals.others === 0) {
             summaryLines.push("No files were found to download.");
+            bulkKind = "info";
           } else {
             statusDiv.text("Creating ZIP...");
             addMergeHelpers(zip, groups);
@@ -1574,11 +1759,12 @@ if __name__ == '__main__':
               (multiUnit ? "PESU_AllUnits" : safeFileName(units[0].label, "files")) +
               "_" + typesLabel + ".zip";
             triggerDownload(blob, zipName);
+            bulkKind = "ok";
             summaryLines.push(
               (multiUnit ? units.length - skippedUnits.length + " units \u00b7 " : "") +
                 totals.pdfs + " PDFs merged (" + totals.pages + " pages) \u00b7 " +
                 totals.others + " other files" +
-                (groups.length ? " \u00b7 merge_office_files.py included" : "") +
+                (groups.length ? " \u00b7 merge script included" : "") +
                 " \u00b7 " + formatSize(blob.size),
             );
           }
@@ -1589,6 +1775,7 @@ if __name__ == '__main__':
         } catch (err) {
           console.error("[PESUClaw] Bulk download failed:", err);
           summaryLines.push("Failed: " + (err && err.message ? err.message : err));
+          bulkKind = "error";
         } finally {
           // Put the page back on the unit the user was looking at
           if (
@@ -1606,13 +1793,11 @@ if __name__ == '__main__':
           _bulkCancel = false;
           cancelBtn.hide();
           progressWrap.hide();
-          refetchBtn.prop("disabled", false).css("opacity", 1);
+          refetchBtn.prop("disabled", false);
+          setBusy(false);
           _lastActiveTab = getActiveUnitText();
           renderOrFetch();
-          statusDiv.empty();
-          summaryLines.forEach(function (line) {
-            statusDiv.append($("<div></div>").text(line));
-          });
+          setStatusLines(summaryLines, bulkKind);
         }
       }
 
@@ -1827,10 +2012,11 @@ if __name__ == '__main__':
         }
 
         _fetching = true;
-        refetchBtn.prop("disabled", true).css("opacity", 0.5);
-        titleDiv.text("Loading " + unitKey + "...");
-        statusDiv.text("Detecting course content...");
-        contentArea.empty();
+        refetchBtn.prop("disabled", true);
+        titleDiv.text(unitLabels[unitKey] || unitKey);
+        setStatus("Detecting course content...", "loading");
+        clearView();
+        showSkeleton();
         progressWrap.show();
         progressBar.css("width", "20%");
 
@@ -1887,10 +2073,13 @@ if __name__ == '__main__':
           );
 
           if (!classes.length) {
-            statusDiv.text("No course content found");
-            titleDiv.text("No content");
+            setStatus("No course content found", "info");
+            showEmpty(
+              "No course content in this unit",
+              "PESU didn\u2019t list any classes here. Try another unit.",
+            );
             _fetching = false;
-            refetchBtn.prop("disabled", false).css("opacity", 1);
+            refetchBtn.prop("disabled", false);
             progressWrap.hide();
             return;
           }
@@ -1961,13 +2150,20 @@ if __name__ == '__main__':
           renderItems(unitKey, cachedUnit, false);
         } catch (err) {
           console.error("[PESUClaw] Fetch error:", err);
-          titleDiv.text("Error");
-          statusDiv.text("Failed: " + (err.message || err));
+          var rawMsg = String(err.message || err);
+          setStatus("Couldn\u2019t load this unit", "error");
+          showEmpty(
+            "Something went wrong",
+            /did not update/i.test(rawMsg)
+              ? "PESU hasn\u2019t finished loading this unit. Give it a moment, then try again."
+              : rawMsg,
+            { error: true, retry: true },
+          );
           progressWrap.hide();
         }
 
         _fetching = false;
-        refetchBtn.prop("disabled", false).css("opacity", 1);
+        refetchBtn.prop("disabled", false);
       }
 
       // ─── Refetch ───

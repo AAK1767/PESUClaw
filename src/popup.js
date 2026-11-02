@@ -7,10 +7,17 @@
   var actionApi = api.action || api.browserAction || null;
   var statusEl = document.getElementById('update-status');
   var footerEl = document.getElementById('version-footer');
+  var repoUrl = 'https://github.com/AAK1767/PESUClaw';
   var latestReleaseUrl = 'https://api.github.com/repos/AAK1767/PESUClaw/releases/latest';
-  var releasePageUrl = 'https://github.com/AAK1767/PESUClaw/releases/latest';
+  var releasePageUrl = repoUrl + '/releases/latest';
+  // Fallback that avoids GitHub's API rate limit (tag list only, CORS-enabled)
+  var jsdelivrTagsUrls = [
+    'https://data.jsdelivr.com/v1/packages/gh/AAK1767/PESUClaw',
+    'https://data.jsdelivr.com/v1/package/gh/AAK1767/PESUClaw'
+  ];
   var updateCacheKey = 'pesuclaw.latestRelease';
   var updateCacheTtl = 6 * 60 * 60 * 1000;
+  var updateFailureTtl = 30 * 60 * 1000;
 
   if (footerEl) {
     footerEl.textContent = 'Installed v' + currentVersion;
@@ -48,80 +55,146 @@
     if (!statusEl) return;
     statusEl.className = 'update' + (kind ? ' ' + kind : '');
     statusEl.textContent = '';
-    statusEl.appendChild(document.createTextNode(message.text || ''));
 
+    var text = document.createElement('div');
+    text.appendChild(document.createTextNode(message.text || ''));
     if (message.linkText && message.linkUrl) {
-      statusEl.appendChild(document.createTextNode(' '));
+      text.appendChild(document.createTextNode(' '));
       var link = document.createElement('a');
       link.href = message.linkUrl;
       link.target = '_blank';
       link.rel = 'noreferrer';
       link.textContent = message.linkText;
-      statusEl.appendChild(link);
+      text.appendChild(link);
     }
+    statusEl.appendChild(text);
+    if (message.title) statusEl.title = message.title;
+  }
+
+  function fetchJson(url, timeoutMs) {
+    var controller = new AbortController();
+    var timer = setTimeout(function () {
+      controller.abort();
+    }, timeoutMs || 8000);
+    // No custom headers: keeps this a simple CORS request (no preflight).
+    return fetch(url, { signal: controller.signal, cache: 'no-store' })
+      .then(function (response) {
+        if (!response.ok) {
+          throw new Error(url + ' responded with ' + response.status);
+        }
+        return response.json();
+      })
+      .finally(function () {
+        clearTimeout(timer);
+      });
+  }
+
+  async function fetchLatestRelease() {
+    var errors = [];
+
+    // 1) GitHub releases API
+    try {
+      var release = await fetchJson(latestReleaseUrl);
+      if (release && (release.tag_name || release.name)) return release;
+      errors.push('GitHub API returned no release');
+    } catch (error) {
+      errors.push(String(error && error.message ? error.message : error));
+    }
+
+    // 2) jsDelivr tag list
+    for (var i = 0; i < jsdelivrTagsUrls.length; i++) {
+      try {
+        var data = await fetchJson(jsdelivrTagsUrls[i]);
+        var versions = (data && data.versions ? data.versions : [])
+          .map(function (entry) {
+            return String(entry && entry.version ? entry.version : entry);
+          })
+          .filter(function (version) {
+            return /^v?\d+(\.\d+)*$/.test(version);
+          });
+        if (versions.length) {
+          versions.sort(compareVersions);
+          var newest = versions[versions.length - 1];
+          return { tag_name: newest, html_url: repoUrl + '/releases/tag/' + newest };
+        }
+        errors.push('jsDelivr returned no tags');
+      } catch (error2) {
+        errors.push(String(error2 && error2.message ? error2.message : error2));
+      }
+    }
+
+    throw new Error(errors.join(' | '));
   }
 
   async function checkForUpdate() {
     try {
-      setStatus({ text: 'Checking GitHub for updates...' }, 'checking');
+      setStatus({ text: 'Checking for updates\u2026' }, 'checking');
 
-      var cachedUpdate = null;
+      var cached = null;
       try {
-        cachedUpdate = JSON.parse(localStorage.getItem(updateCacheKey) || 'null');
+        cached = JSON.parse(localStorage.getItem(updateCacheKey) || 'null');
       } catch (error) {
         console.warn('[PESUClaw] Could not read update cache:', error);
       }
-      if (
-        cachedUpdate &&
-        cachedUpdate.checkedAt &&
-        Date.now() - cachedUpdate.checkedAt < updateCacheTtl
-      ) {
-        showReleaseStatus(cachedUpdate.release);
-        return;
-      }
-
-      var response = await fetch(latestReleaseUrl, {
-        headers: {
-          Accept: 'application/vnd.github+json'
+      if (cached && cached.checkedAt) {
+        var age = Date.now() - cached.checkedAt;
+        if (cached.release && age < updateCacheTtl) {
+          showReleaseStatus(cached.release);
+          return;
         }
-      });
-
-      if (!response.ok) {
-        throw new Error('GitHub responded with ' + response.status);
+        if (cached.failed && age < updateFailureTtl) {
+          showCheckFailed(cached.message);
+          return;
+        }
       }
 
-      var release = await response.json();
-      var latestVersion = normalizeVersion(release.tag_name || release.name || '');
-
-      if (!latestVersion) {
-        throw new Error('Could not determine the latest release version');
-      }
+      var release = await fetchLatestRelease();
       try {
-      localStorage.setItem(
-        updateCacheKey,
-        JSON.stringify({ checkedAt: Date.now(), release: release })
-      );
+        localStorage.setItem(
+          updateCacheKey,
+          JSON.stringify({ checkedAt: Date.now(), release: release })
+        );
       } catch (error) {
-      console.warn('[PESUClaw] Could not save update cache:', error);
+        console.warn('[PESUClaw] Could not save update cache:', error);
       }
       showReleaseStatus(release);
     } catch (error) {
-      setStatus(
+      var message = String(error && error.message ? error.message : error);
+      showCheckFailed(message);
+      try {
+        localStorage.setItem(
+          updateCacheKey,
+          JSON.stringify({ checkedAt: Date.now(), failed: true, message: message })
+        );
+      } catch (storageError) {
+        /* ignore */
+      }
+    }
+  }
+
+  function showCheckFailed(message) {
+    setStatus(
       {
-        text: 'Could not check GitHub releases. '
+        text: 'Couldn\u2019t check for updates right now.',
+        linkText: 'See releases',
+        linkUrl: releasePageUrl,
+        title: message || ''
       },
       'error'
-      );
-      statusEl.appendChild(document.createTextNode(error && error.message ? error.message : ''));
-    }
+    );
   }
 
   function showReleaseStatus(release) {
     var latestVersion = normalizeVersion(release.tag_name || release.name || '');
+    if (!latestVersion) {
+      showCheckFailed('Could not determine the latest release version');
+      return;
+    }
+
     if (compareVersions(latestVersion, currentVersion) > 0) {
       setStatus(
         {
-          text: 'New release v' + latestVersion + ' is available. Download and install it to update PESUClaw.',
+          text: 'Version v' + latestVersion + ' is available.',
           linkText: 'Download update',
           linkUrl: release.html_url || releasePageUrl
         },
@@ -140,7 +213,7 @@
       return;
     }
 
-    setStatus({ text: 'You are on the latest release.' }, 'ready');
+    setStatus({ text: 'You\u2019re on the latest version (v' + currentVersion + ').' }, 'ready');
 
     if (actionApi && actionApi.setBadgeText) {
       actionApi.setBadgeText({ text: '' });
